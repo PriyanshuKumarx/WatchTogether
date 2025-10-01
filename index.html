@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SyncStream - Watch YouTube Together</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-logo">
+                <i class="fab fa-youtube"></i>
+                <span>SyncStream</span>
+            </div>
+            <div class="nav-links">
+                <a href="#features">Features</a>
+                <a href="#how-it-works">How It Works</a>
+                <a href="auth.html" class="btn btn-secondary nav-btn">Sign In</a>
+                <a href="auth.html?action=signup" class="btn btn-primary nav-btn">Get Started</a>
+            </div>
+            <div class="nav-toggle">
+                <i class="fas fa-bars"></i>
+            </div>
+        </div>
+    </nav>
+
+    <section class="hero">
+        <div class="hero-container">
+            <div class="hero-content">
+                <div class="hero-badge">
+                    <i class="fas fa-rocket"></i>
+                    <span>Real-Time Watch Party Platform</span>
+                </div>
+                <h1 class="hero-title">
+                    Sync Your <span class="gradient-text">Video</span> Experience with Friends
+                </h1>
+                <p class="hero-description">
+                    Create watch parties, sync YouTube video playback perfectly, and chat live with friends from anywhere in the world.
+                </p>
+                <div class="hero-actions">
+                    <a href="auth.html?action=signup" class="btn btn-primary btn-large">
+                        <i class="fas fa-play-circle"></i>
+                        Start Watch Party
+                    </a>
+                    <a href="#features" class="btn btn-secondary btn-large">
+                        <i class="fas fa-info-circle"></i>
+                        Discover Features
+                    </a>
+                </div>
+                <div class="hero-stats">
+                    <div class="stat">
+                        <div class="stat-number">10K+</div>
+                        <div class="stat-label">Watch Parties</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-number">50K+</div>
+                        <div class="stat-label">Videos Synced</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-number">99.9%</div>
+                        <div class="stat-label">Sync Precision</div>
+                    </div>
+                </div>
+            </div>
+            <div class="hero-visual">
+                <div class="visual-container">
+                    <div class="app-preview card">
+                        <div class="preview-header">
+                            <div class="preview-dots">
+                                <span style="background: var(--error-color);"></span>
+                                <span style="background: var(--warning-color);"></span>
+                                <span style="background: var(--success-color);"></span>
+                            </div>
+                        </div>
+                        <div class="preview-video">
+                            <div class="video-placeholder"></div>
+                        </div>
+                        <div class="preview-chat">
+                            <div class="chat-message preview">
+                                <div class="message-avatar"></div>
+                                <div class="message-content">
+                                    <div class="message-text">This is incredible! ZERO lag! 🔥</div>
+                                </div>
+                            </div>
+                            <div class="chat-message preview self">
+                                <div class="message-content">
+                                    <div class="message-text">I know right! It's perfectly synced!</div>
+                                </div>
+                                <div class="message-avatar"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="hero-bg-elements">
+            <div class="bg-circle circle-1"></div>
+            <div class="bg-circle circle-2"></div>
+            <div class="bg-circle circle-3"></div>
+        </div>
+    </section>
+
+    <section id="features" class="features">
+        <div class="container">
+            <div class="section-header">
+                <h2>Key Features</h2>
+                <p>Everything you need for the perfect remote watch party</p>
+            </div>
+            <div class="features-grid">
+                <div class="feature-card card">
+                    <div class="feature-icon"><i class="fas fa-sync-alt"></i></div>
+                    <h3>Real-time Sync</h3>
+                    <p>Perfectly synchronized video playback across all participants with sub-second precision using WebSocket and WebRTC.</p>
+                </div>
+                <div class="feature-card card">
+                    <div class="feature-icon"><i class="fas fa-comments"></i></div>
+                    <h3>Live Chat</h3>
+                    <p>Chat with your friends in real-time, share reactions, and talk about the video as it plays.</p>
+                </div>
+                <div class="feature-card card">
+                    <div class="feature-icon"><i class="fas fa-users"></i></div>
+                    <h3>Private Rooms</h3>
+                    <p>Create unique, private rooms and easily share the link to invite your closest friends.</p>
+                </div>
+                <div class="feature-card card">
+                    <div class="feature-icon"><i class="fas fa-bolt"></i></div>
+                    <h3>WebRTC Powered</h3>
+                    <p>Utilizes WebRTC for low-latency, peer-to-peer data transfer for the best possible experience.</p>
+                </div>
+                <div class="feature-card card">
+                    <div class="feature-icon"><i class="fas fa-mobile-alt"></i></div>
+                    <h3>Cross-Platform</h3>
+                    <p>Enjoy watch parties seamlessly on any device, including desktop, tablet, and mobile browsers.</p>
+                </div>
+                <div class="feature-card card">
+                    <div class="feature-icon"><i class="fas fa-shield-alt"></i></div>
+                    <h3>Secure & Simple</h3>
+                    <p>Simple account creation and end-to-end encrypted peer-to-peer connections for privacy.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="how-it-works" class="how-it-works">
+        <div class="container">
+            <div class="section-header">
+                <h2>How It Works</h2>
+                <p>Get started in just 3 simple steps</p>
+            </div>
+            <div class="steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h3>Create Account</h3>
+                        <p>Sign up quickly with email or social login to get your personalized username.</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h3>Start a Room</h3>
+                        <p>Generate a new, unique watch room, and paste your favorite YouTube link.</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <h3>Invite & Watch</h3>
+                        <p>Share the room link with friends and start watching together in perfect harmony!</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="cta">
+        <div class="container">
+            <div class="cta-content">
+                <h2>Ready to Start Your Watch Party?</h2>
+                <p>Join thousands of users already enjoying synchronized YouTube watching</p>
+                <a href="auth.html?action=signup" class="btn btn-primary btn-large">
+                    <i class="fas fa-users"></i>
+                    Get Started Free
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <div class="nav-logo">
+                        <i class="fab fa-youtube"></i>
+                        <span>SyncStream</span>
+                    </div>
+                    <p>Watch YouTube together with friends in perfect sync.</p>
+                </div>
+                <div class="footer-links">
+                    <div class="footer-column">
+                        <h4>Product</h4>
+                        <a href="#features">Features</a>
+                        <a href="#how-it-works">How It Works</a>
+                        <a href="#">Pricing</a>
+                    </div>
+                    <div class="footer-column">
+                        <h4>Company</h4>
+                        <a href="about.html">About</a>
+                        <a href="blog.html">Blog</a>
+                        <a href="contact.html">Contact</a>
+                    </div>
+                    <div class="footer-column">
+                        <h4>Legal</h4>
+                        <a href="privacy.html">Privacy Policy</a>
+                        <a href="terms.html">Terms of Service</a>
+                        <a href="cookie.html">Cookie Policy</a>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 SyncStream. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="auth.js"></script>
+</body>
+</html>
