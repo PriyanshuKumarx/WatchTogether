@@ -7,7 +7,6 @@ A real-time YouTube watch party platform that allows users to watch YouTube vide
 
 - 🎥 **Real-time Video Sync**: Perfectly synchronized YouTube video playback
 - 💬 **Live Chat**: Chat with friends while watching videos
-- 👥 **Multi-user Rooms**: Create private rooms and invite friends
 - 🔐 **User Authentication**: Secure signup and login system
 - 📱 **Responsive Design**: Works on all devices
 - 🎨 **Modern UI**: Beautiful, intuitive interface with dark/light themes
