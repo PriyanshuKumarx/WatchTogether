@@ -1,3 +1,4 @@
+>>>>>>> main
 # SyncStream - YouTube Watch Together
 
 A real-time YouTube watch party platform that allows users to watch YouTube videos together with perfect synchronization and live chat.
@@ -26,3 +27,6 @@ A real-time YouTube watch party platform that allows users to watch YouTube vide
 ```bash
 git clone <repository-url>
 cd youtube-watch-together
+=======
+# WatchTogether
+>>>>>>> 07905676f848ac235d328548a852dc5c8bc943be
