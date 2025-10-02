@@ -9,7 +9,7 @@ class YouTubeWatchTogether {
         this.isConnected = false;
         this.isOfferer = false;
         this.currentUser = null;
-        this.peers = []; // 🔑 FIXED: Store current peer IDs
+        this.peers = [];
 
         this.init();
     }
@@ -74,7 +74,7 @@ class YouTubeWatchTogether {
     }
 
     initializeSocket() {
-        // FIX: Explicitly connect to the Node.js Socket.IO server on port 3000
+        // Correctly target the Node.js Socket.IO server on port 3000
         this.socket = io("http://127.0.0.1:3000"); 
 
         this.socket.on('connect', () => {
@@ -87,30 +87,25 @@ class YouTubeWatchTogether {
         this.socket.on('user-joined', (userId) => {
             this.addChatMessage('System', 'A peer joined the room', true);
             this.showNotification('Peer joined the room', 'info');
-            this.peers.push(userId); // Add newly joined peer
+            this.peers.push(userId);
             
-            // If we are the offeror, connecting is handled by onnegotiationneeded or room-users, 
-            // but we ensure peerConnection is set up to handle incoming/outgoing signals.
             if (this.isOfferer && !this.peerConnection) this.connect();
         });
 
         this.socket.on('room-users', (users) => {
-            this.peers = users; // 🔑 FIX: Store the initial list of peers
+            this.peers = users; 
             this.isOfferer = users.length === 0;
             
-            if (users.length > 0) {
-                this.addChatMessage('System', `Found ${users.length} peer(s) in the room`, true);
-            }
+            if (users.length > 0) console.log(`Found ${users.length} peers.`);
             
-            // FIX: If we just joined and there's another peer, initiate connection
             if (this.peers.length > 0 && !this.peerConnection) {
-                 this.connect(); // All joining peers should attempt connection setup
+                 this.connect(); 
             }
         });
 
         this.socket.on('user-left', (userId) => { 
             this.addChatMessage('System', 'A peer disconnected', true); 
-            this.peers = this.peers.filter(id => id !== userId); // Remove disconnected peer
+            this.peers = this.peers.filter(id => id !== userId);
             this.updateConnectionStatus(false); 
         });
 
@@ -196,7 +191,6 @@ class YouTubeWatchTogether {
     }
 
     setupPeerConnection() {
-        // Robust STUN servers for improved WebRTC reliability
         const configuration = { iceServers: [
             { urls: 'stun:stun.l.google.com:19302' }, 
             { urls: 'stun:stun1.l.google.com:19302' }, 
@@ -214,7 +208,7 @@ class YouTubeWatchTogether {
         this.peerConnection.onicecandidate = (event) => { 
             if (event.candidate) {
                 console.log("📤 Sending ICE candidate...");
-                // 🔑 FIX: Send ICE candidate to the entire room for robust peer discovery
+                // Send ICE candidate to the room for discovery
                 this.socket.emit('ice-candidate', { target: this.roomId, candidate: event.candidate });
             }
         };
@@ -225,7 +219,6 @@ class YouTubeWatchTogether {
         };
         
         this.peerConnection.onnegotiationneeded = async () => { 
-            // 🔑 FIX: Negotiation must be triggered by Offeror
             if (this.isOfferer) await this.createOffer(); 
         };
     }
@@ -243,7 +236,6 @@ class YouTubeWatchTogether {
         await this.peerConnection.setLocalDescription(offer);
         
         console.log("📤 Sending offer (Targeting Room)...");
-        // 🔑 FIX: Send offer to the entire room for initial discovery
         this.socket.emit('offer', { target: this.roomId, offer: offer });
     }
 
@@ -272,6 +264,11 @@ class YouTubeWatchTogether {
         }
     }
 
+    onPlayerError(event) {
+        console.error('YouTube player error:', event.data);
+        this.showNotification(`Youtubeer error: ${event.data}`, 'error');
+    }
+
     handleVideoStateChange(data) {
         if (!this.player) return;
         window.ignorePlayerStateChange = true;
@@ -294,11 +291,9 @@ class YouTubeWatchTogether {
         if (!message) return;
         const messageData = { username: this.currentUser.username, text: message, timestamp: new Date().toLocaleTimeString() };
 
-        // 1. Prefer WebRTC DataChannel (if open)
         if (this.dataChannel?.readyState === 'open') {
             this.dataChannel.send(JSON.stringify(messageData));
         }
-        // 2. Fallback to Socket.IO (if connected)
         else if (this.socket?.connected) {
             this.socket.emit('chat-message', { target: this.roomId, message, username: this.currentUser.username, timestamp: messageData.timestamp });
         }
@@ -309,19 +304,25 @@ class YouTubeWatchTogether {
 
     addChatMessage(username, text, isSystem = false, isSelf = false) {
         const chatMessages = document.getElementById('chatMessages'); if (!chatMessages) return;
-        const messageElement = document.createElement('div'); messageElement.className = 'chat-message';
-        const timestamp = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        const messageElement = document.createElement('div'); 
         
-        messageElement.classList.toggle('system', isSystem); 
-        messageElement.classList.toggle('self', isSelf);
-        
-        messageElement.innerHTML = `
-            <div class="message-meta">
-                <span class="username">${username}</span>
-                <span class="timestamp">${timestamp}</span>
-            </div>
-            <div class="message-text">${text}</div>
-        `;
+        if (isSystem) {
+             messageElement.classList.add('chat-message', 'system');
+             messageElement.innerHTML = `<div class="message-text">${text}</div>`;
+        } else {
+             messageElement.classList.add('chat-message');
+             if (isSelf) messageElement.classList.add('self');
+             
+             const timestamp = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+             messageElement.innerHTML = `
+                 <div class="message-meta">
+                     <span class="username">${username}</span>
+                     <span class="timestamp">${timestamp}</span>
+                 </div>
+                 <div class="message-text">${text}</div>
+             `;
+        }
         
         chatMessages.appendChild(messageElement); chatMessages.scrollTop = chatMessages.scrollHeight;
     }
@@ -333,7 +334,14 @@ class YouTubeWatchTogether {
         localStorage.setItem('theme', isLight ? 'light' : 'dark');
     }
 
-    applySavedTheme() { if (localStorage.getItem('theme') === 'light') document.documentElement.classList.add('light-theme'); }
+    applySavedTheme() { 
+        const savedTheme = localStorage.getItem('theme');
+        const themeToggle = document.getElementById('themeToggle');
+        if (savedTheme === 'light') {
+            document.documentElement.classList.add('light-theme');
+            if (themeToggle) themeToggle.innerHTML = '<i class="fas fa-sun"></i>';
+        }
+    }
 
     toggleUserMenu(e) { e.stopPropagation(); document.getElementById('userDropdown')?.classList.toggle('hidden'); }
     closeUserMenu() { document.getElementById('userDropdown')?.classList.add('hidden'); }
@@ -368,4 +376,8 @@ class YouTubeWatchTogether {
     }
 }
 
-document.addEventListener('DOMContentLoaded', () => { if (document.querySelector('.app-container')) new YouTubeWatchTogether(); });
+document.addEventListener('DOMContentLoaded', () => {
+    if (document.querySelector('.app-container')) {
+        new YouTubeWatchTogether();
+    }
+});
