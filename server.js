@@ -26,7 +26,7 @@ const allowedOrigins = [
     'http://localhost:5500',
     'http://127.0.0.1:3000', 
     'http://localhost:3000',
-    'https://syncstream-app.onrender.com' // Deployed Origin
+    'https://syncstream-app.onrender.com'
 ];
 
 const corsOptions = {
@@ -46,7 +46,7 @@ const io = new Server(server, {
     cors: corsOptions
 });
 
-// Mock Initial User for Testing
+// Mock Initial User (for testing sign-in)
 async function initializeMockUsers() {
     const mockUserEmail = 'test@user.com';
     if (!users.has(mockUserEmail)) {
@@ -119,7 +119,7 @@ app.post('/api/auth/signin', async (req, res) => {
 
 // --- Socket.io Events (WebRTC Signaling) ---
 io.on('connection', (socket) => {
-    console.log('New client connected:', socket.id);
+    console.log('User connected:', socket.id);
 
     socket.on('join-room', (roomId) => {
         if (socket.roomId) { socket.leave(socket.roomId); }
@@ -131,25 +131,16 @@ io.on('connection', (socket) => {
         
         if (!room.users.includes(socket.id)) { room.users.push(socket.id); }
         
-        // 🔑 FIX: Send initial list of peers
         socket.emit('room-users', room.users.filter(id => id !== socket.id));
-        // Notify others
         socket.to(roomId).emit('user-joined', socket.id);
     });
 
     // WebRTC Signaling Handlers
-    socket.on('offer', (data) => { 
-        // 🔑 FIX: Target specific peer if provided (not the whole room) 
-        if (data.target) {
-             io.to(data.target).emit('offer', { offer: data.offer, sender: socket.id });
-        } else {
-             // Fallback to room for broadcast offer (less efficient, but safer)
-             socket.to(socket.roomId).emit('offer', { offer: data.offer, sender: socket.id });
-        }
-    });
-    
+    // 🔑 FIX: Broadcast all offer/ice candidates within the room 
+    // (since we are using data channels and not individual sockets for signaling)
+    socket.on('offer', (data) => { socket.to(socket.roomId).emit('offer', { offer: data.offer, sender: socket.id }); });
     socket.on('answer', (data) => { io.to(data.target).emit('answer', { answer: data.answer, sender: socket.id }); });
-    socket.on('ice-candidate', (data) => { io.to(data.target).emit('ice-candidate', { candidate: data.candidate, sender: socket.id }); });
+    socket.on('ice-candidate', (data) => { socket.to(data.target).emit('ice-candidate', { candidate: data.candidate, sender: socket.id }); });
     
     // Video Sync & Chat
     socket.on('video-state', (data) => { socket.to(socket.roomId).emit('video-state', { ...data, sender: socket.id }); });

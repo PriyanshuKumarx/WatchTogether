@@ -9,7 +9,7 @@ class YouTubeWatchTogether {
         this.isConnected = false;
         this.isOfferer = false;
         this.currentUser = null;
-        this.peers = []; // 🔑 NEW: Store current peer IDs for targeting
+        this.peers = []; // 🔑 FIXED: Store current peer IDs
 
         this.init();
     }
@@ -74,24 +74,23 @@ class YouTubeWatchTogether {
     }
 
     initializeSocket() {
-        // ✅ FIX: Explicitly connect to the Node.js Socket.IO server on port 3000
-        this.socket = io("http://127.0.0.1:3000");
+        // FIX: Explicitly connect to the Node.js Socket.IO server on port 3000
+        this.socket = io("http://127.0.0.1:3000"); 
 
         this.socket.on('connect', () => {
             this.showNotification('Connected to signaling server', 'success');
-            console.log("✅ Connected:", this.socket.id);
+            console.log("✅ Connected to signaling server:", this.socket.id);
             this.socket.emit('join-room', this.roomId);
             this.updateConnectionStatus(false);
         });
 
-        this.socket.on('user-joined', (userId) => { 
-            this.addChatMessage('System', 'A peer joined the room', true); 
-            this.showNotification('Peer joined', 'info'); 
+        this.socket.on('user-joined', (userId) => {
+            this.addChatMessage('System', 'A peer joined the room', true);
+            this.showNotification('Peer joined the room', 'info');
+            this.peers.push(userId); // Add newly joined peer
             
-            // Add new peer to the list
-            if (!this.peers.includes(userId)) this.peers.push(userId);
-            
-            // If we are the offeror and a new peer joins, we can start the connection now
+            // If we are the offeror, connecting is handled by onnegotiationneeded or room-users, 
+            // but we ensure peerConnection is set up to handle incoming/outgoing signals.
             if (this.isOfferer && !this.peerConnection) this.connect();
         });
 
@@ -99,12 +98,16 @@ class YouTubeWatchTogether {
             this.peers = users; // 🔑 FIX: Store the initial list of peers
             this.isOfferer = users.length === 0;
             
-            if (users.length > 0) console.log(`Found ${users.length} peers.`);
+            if (users.length > 0) {
+                this.addChatMessage('System', `Found ${users.length} peer(s) in the room`, true);
+            }
             
-            // If users are already in the room (and we are the offeror), start connection
-            if (this.isOfferer && !this.peerConnection && users.length > 0) this.connect();
+            // FIX: If we just joined and there's another peer, initiate connection
+            if (this.peers.length > 0 && !this.peerConnection) {
+                 this.connect(); // All joining peers should attempt connection setup
+            }
         });
-        
+
         this.socket.on('user-left', (userId) => { 
             this.addChatMessage('System', 'A peer disconnected', true); 
             this.peers = this.peers.filter(id => id !== userId); // Remove disconnected peer
@@ -114,6 +117,7 @@ class YouTubeWatchTogether {
         this.socket.on('offer', async (data) => { console.log("📥 Received offer..."); await this.handleOffer(data.offer, data.sender); });
         this.socket.on('answer', async (data) => { console.log("📥 Received answer..."); await this.handleAnswer(data.answer); });
         this.socket.on('ice-candidate', async (data) => { await this.handleIceCandidate(data.candidate); });
+        
         this.socket.on('video-state', (data) => { if (this.player && data.sender !== this.socket.id) this.handleVideoStateChange(data); });
         this.socket.on('chat-message', (data) => this.addChatMessage(data.username, data.text, false));
         this.socket.on('disconnect', () => this.updateConnectionStatus(false));
@@ -131,7 +135,7 @@ class YouTubeWatchTogether {
             height: '100%',
             width: '100%',
             playerVars: { playsinline: 1, controls: 1, rel: 0, modestbranding: 1, disablekb: 1 },
-            events: { 'onStateChange': (e) => this.onPlayerStateChange(e), 'onReady': (e) => this.onPlayerReady(e) }
+            events: { 'onStateChange': (e) => this.onPlayerStateChange(e), 'onReady': (e) => this.onPlayerReady(e), 'onError': (e) => this.onPlayerError(e) }
         });
     }
 
@@ -157,6 +161,7 @@ class YouTubeWatchTogether {
     connect() {
         const connectBtn = document.getElementById('connectBtn');
         if (!this.peerConnection) {
+            console.log("📡 Creating RTCPeerConnection...");
             this.setupPeerConnection();
             connectBtn.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Connecting...';
             connectBtn.classList.add('connecting');
@@ -194,6 +199,8 @@ class YouTubeWatchTogether {
         // Robust STUN servers for improved WebRTC reliability
         const configuration = { iceServers: [
             { urls: 'stun:stun.l.google.com:19302' }, 
+            { urls: 'stun:stun1.l.google.com:19302' }, 
+            { urls: 'stun:stun2.l.google.com:19302' },
             { urls: 'stun:stun.services.mozilla.com' }, 
             { urls: 'stun:global.stun.twilio.com:3478' }
         ]};
@@ -206,14 +213,21 @@ class YouTubeWatchTogether {
 
         this.peerConnection.onicecandidate = (event) => { 
             if (event.candidate) {
-                // 🔑 FIX: Send ICE candidate to all available peers individually
-                for (const peerId of this.peers) {
-                    this.socket.emit('ice-candidate', { target: peerId, candidate: event.candidate });
-                }
+                console.log("📤 Sending ICE candidate...");
+                // 🔑 FIX: Send ICE candidate to the entire room for robust peer discovery
+                this.socket.emit('ice-candidate', { target: this.roomId, candidate: event.candidate });
             }
         };
-        this.peerConnection.onconnectionstatechange = () => { this.updateConnectionStatus(this.peerConnection.connectionState === 'connected'); };
-        this.peerConnection.onnegotiationneeded = async () => { if (this.isOfferer) await this.createOffer(); };
+        
+        this.peerConnection.onconnectionstatechange = () => { 
+            console.log(`WebRTC Connection state: ${this.peerConnection.connectionState}`);
+            this.updateConnectionStatus(this.peerConnection.connectionState === 'connected'); 
+        };
+        
+        this.peerConnection.onnegotiationneeded = async () => { 
+            // 🔑 FIX: Negotiation must be triggered by Offeror
+            if (this.isOfferer) await this.createOffer(); 
+        };
     }
 
     setupDataChannel() {
@@ -228,10 +242,9 @@ class YouTubeWatchTogether {
         const offer = await this.peerConnection.createOffer();
         await this.peerConnection.setLocalDescription(offer);
         
-        // 🔑 FIX: Send offer to all current peers
-        for (const peerId of this.peers) {
-            this.socket.emit('offer', { target: peerId, offer: offer });
-        }
+        console.log("📤 Sending offer (Targeting Room)...");
+        // 🔑 FIX: Send offer to the entire room for initial discovery
+        this.socket.emit('offer', { target: this.roomId, offer: offer });
     }
 
     async handleOffer(offer, senderId) {
@@ -239,6 +252,8 @@ class YouTubeWatchTogether {
         await this.peerConnection.setRemoteDescription(offer);
         const answer = await this.peerConnection.createAnswer();
         await this.peerConnection.setLocalDescription(answer);
+        
+        console.log("📤 Sending answer...");
         this.socket.emit('answer', { target: senderId, answer: answer });
     }
 
@@ -253,7 +268,6 @@ class YouTubeWatchTogether {
         if (!this.player) return;
         const state = { sender: this.socket.id, state: event.data, currentTime: this.player.getCurrentTime(), videoId: this.player.getVideoData().video_id };
         if (state.state === YT.PlayerState.PLAYING || state.state === YT.PlayerState.PAUSED) {
-            // Target the whole room for video sync 
             this.socket.emit('video-state', { target: this.roomId, ...state });
         }
     }
@@ -264,7 +278,6 @@ class YouTubeWatchTogether {
         const playerState = this.player.getPlayerState();
         
         if (data.state === YT.PlayerState.PLAYING) { 
-             // Seek only if difference is significant (to minimize constant seeking)
             if (Math.abs(this.player.getCurrentTime() - data.currentTime) > 1) this.player.seekTo(data.currentTime, true); 
             if (playerState !== YT.PlayerState.PLAYING) this.player.playVideo(); 
         } else if (data.state === YT.PlayerState.PAUSED) { 
@@ -302,7 +315,6 @@ class YouTubeWatchTogether {
         messageElement.classList.toggle('system', isSystem); 
         messageElement.classList.toggle('self', isSelf);
         
-        // Simplified message content structure for robust chat:
         messageElement.innerHTML = `
             <div class="message-meta">
                 <span class="username">${username}</span>
@@ -329,17 +341,30 @@ class YouTubeWatchTogether {
     createNewRoom() { window.location.href = `app.html?room=room-${Math.random().toString(36).substr(2, 9)}`; }
     copyToClipboard(text) { navigator.clipboard.writeText(text).catch(err => console.error('Copy failed:', err)); }
     
-    // NOTE: Notification implementation should be added here, as included in your previous CSS
     showNotification(message, type = 'info') { 
         const notificationArea = document.getElementById('notificationArea');
         if (!notificationArea) return; 
 
         const notification = document.createElement('div');
         notification.className = `notification ${type}`;
-        notification.innerHTML = `<span>${message}</span>`; // Simplified structure for quick fix
+        
+        const icons = {
+            success: 'check-circle',
+            error: 'exclamation-circle',
+            warning: 'exclamation-triangle',
+            info: 'info-circle'
+        };
+
+        notification.innerHTML = `
+            <i class="fas fa-${icons[type] || 'info-circle'}"></i>
+            <span>${message}</span>
+        `;
         
         notificationArea.appendChild(notification);
-        setTimeout(() => notification.remove(), 5000); 
+        setTimeout(() => {
+            notification.style.animation = 'slideInRight 0.3s ease reverse';
+            setTimeout(() => notification.remove(), 300);
+        }, 5000); 
     }
 }
 
