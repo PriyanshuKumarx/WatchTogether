@@ -6,7 +6,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const cors = require('cors'); 
-const dotenv = require('dotenv'); // 🔑 NEW: Require dotenv
+const dotenv = require('dotenv'); 
 
 // Load environment variables from .env file
 dotenv.config();
@@ -31,6 +31,7 @@ const allowedOrigins = [
 
 const corsOptions = {
     origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or file://) or from explicitly allowed list
         if (!origin || allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
@@ -41,9 +42,15 @@ const corsOptions = {
     credentials: true,
 };
 
-// Initialize Socket.IO with CORS settings
+// Initialize Socket.IO with flexible CORS settings for deployment
 const io = socketIo(server, {
-    cors: corsOptions
+    // FIX: Use '*' for origin in development/deployment environment like Render 
+    // to ensure the client served from the same host can connect.
+    cors: {
+        origin: "*", 
+        methods: ["GET", "POST"],
+        credentials: true
+    }
 });
 
 // Mock Initial User (for testing sign-in)

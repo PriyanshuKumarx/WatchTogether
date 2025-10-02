@@ -92,8 +92,9 @@ class YouTubeWatchTogether {
     }
 
     initializeSocket() {
-        // Fix: Explicitly connect to the Node.js Socket.IO server on port 3000
-        this.socket = io("http://127.0.0.1:3000"); 
+        // FIX: Use io() without arguments to connect dynamically to the host serving the HTML, 
+        // which works both locally and after deployment (e.g., on Render).
+        this.socket = io(); 
 
         this.socket.on('connect', () => {
             this.showNotification('Connected to signaling server', 'success');
