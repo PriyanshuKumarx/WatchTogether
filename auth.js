@@ -1,9 +1,7 @@
 // Authentication functionality (Client-side)
 
-// 🔑 FIX: Set the base URL for the deployed API service.
-// REPLACE THIS PLACEHOLDER with your actual live Render domain (e.g., https://syncstream-app.onrender.com)
-const API_BASE_URL = "https://your-render-service-name.onrender.com"; 
-
+// ✅ FIXED: Set the correct base URL for the deployed API service
+const API_BASE_URL = "https://syncstream-app.onrender.com";
 
 class AuthManager {
     constructor() {
@@ -30,16 +28,14 @@ class AuthManager {
         if (token && user) {
             try {
                 this.currentUser = JSON.parse(user);
-                // If on auth page, redirect to app page because they're already logged in
                 if (isAuthPage) {
-                     this.redirectToApp();
+                    this.redirectToApp();
                 }
             } catch (e) {
                 console.error("Error parsing user data:", e);
-                this.logout();
+                AuthManager.logout();
             }
         } else if (isAppPage) {
-            // If on app page, but missing token, redirect to login
             window.location.href = 'auth.html';
         }
     }
@@ -86,7 +82,7 @@ class AuthManager {
         this.isSignUp = !this.isSignUp;
         this.updateAuthUI();
     }
-    
+
     switchToSignUp() {
         this.isSignUp = true;
         this.updateAuthUI();
@@ -128,16 +124,11 @@ class AuthManager {
 
     clearForm() {
         const form = document.getElementById('authForm');
-        if (form) {
-            form.reset();
-        }
+        if (form) form.reset();
     }
 
     clearErrors() {
-        const errorElements = document.querySelectorAll('.error-message');
-        errorElements.forEach(el => {
-            el.textContent = '';
-        });
+        document.querySelectorAll('.error-message').forEach(el => el.textContent = '');
     }
 
     async handleAuthSubmit(e) {
@@ -156,14 +147,10 @@ class AuthManager {
             const formData = new FormData(e.target);
             const data = Object.fromEntries(formData);
             
-            if (!this.validateForm(data)) {
-                return;
-            }
+            if (!this.validateForm(data)) return;
 
             const apiPath = this.isSignUp ? '/api/auth/signup' : '/api/auth/signin';
-            
-            // FIX: Use the full, deployed URL
-            const fullUrl = API_BASE_URL + apiPath; 
+            const fullUrl = API_BASE_URL + apiPath;
 
             const response = await fetch(fullUrl, { 
                 method: 'POST',
@@ -171,39 +158,31 @@ class AuthManager {
                 body: JSON.stringify(data)
             });
 
-            // Robust error checking for JSON parsing failure
             const text = await response.text();
             let result = {};
             try {
                 result = JSON.parse(text);
-            } catch (e) {
-                // If JSON parsing fails (e.g., server returned plain text or empty body on internal error)
+            } catch {
                 throw new Error(`Server Error: ${response.status} ${response.statusText}`);
             }
 
             if (!response.ok) {
-                 // Throw the specific error message from the JSON body
-                 throw new Error(result.error || 'Authentication failed due to invalid response.');
+                throw new Error(result.error || 'Authentication failed due to invalid response.');
             }
             
-            // Success: Store credentials and redirect
             localStorage.setItem('authToken', result.token);
             localStorage.setItem('currentUser', JSON.stringify(result.user));
 
-            if (this.isSignUp) {
-                this.showNotification('Account created and signed in successfully!', 'success');
-            } else {
-                this.showNotification('Signed in successfully!', 'success');
-            }
+            this.showNotification(
+                this.isSignUp ? 'Account created and signed in successfully!' : 'Signed in successfully!',
+                'success'
+            );
 
-            setTimeout(() => {
-                this.redirectToApp();
-            }, 1000);
+            setTimeout(() => this.redirectToApp(), 1000);
 
         } catch (error) {
             this.showNotification(error.message, 'error');
         } finally {
-            // Reset loading state
             submitText.classList.remove('hidden');
             submitSpinner.classList.add('hidden');
             submitBtn.disabled = false;
@@ -214,11 +193,9 @@ class AuthManager {
         this.clearErrors();
         let isValid = true;
 
-        if (this.isSignUp) {
-            if (!data.username || data.username.length < 3) {
-                this.showError('usernameError', 'Username must be at least 3 characters');
-                isValid = false;
-            }
+        if (this.isSignUp && (!data.username || data.username.length < 3)) {
+            this.showError('usernameError', 'Username must be at least 3 characters');
+            isValid = false;
         }
 
         if (!data.email || !this.isValidEmail(data.email)) {
@@ -240,18 +217,15 @@ class AuthManager {
     }
 
     isValidEmail(email) {
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        return emailRegex.test(email);
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
     }
 
     showError(elementId, message) {
         const element = document.getElementById(elementId);
-        if (element) {
-            element.textContent = message;
-        }
+        if (element) element.textContent = message;
     }
 
-    async handleSocialAuth(btnClasses) {
+    async handleSocialAuth() {
         this.showNotification('Social authentication is coming soon!', 'info');
     }
 
@@ -263,7 +237,6 @@ class AuthManager {
 
     showNotification(message, type = 'info') {
         const notificationArea = document.getElementById('notificationArea') || this.createNotificationArea();
-        
         const notification = document.createElement('div');
         notification.className = `notification ${type}`;
         
@@ -283,12 +256,10 @@ class AuthManager {
 
         setTimeout(() => {
             notification.style.animation = 'slideInRight 0.3s ease reverse';
-            setTimeout(() => {
-                if (notification.parentNode) notification.remove();
-            }, 300);
+            setTimeout(() => notification.remove(), 300);
         }, 5000);
     }
-    
+
     createNotificationArea() {
         const notificationArea = document.createElement('div');
         notificationArea.id = 'notificationArea';
@@ -300,14 +271,11 @@ class AuthManager {
     static checkAuth() {
         const token = localStorage.getItem('authToken');
         const user = localStorage.getItem('currentUser');
-        
-        if (!token || !user) {
-            return null;
-        }
-        
+        if (!token || !user) return null;
+
         try {
             return JSON.parse(user);
-        } catch (e) {
+        } catch {
             return null;
         }
     }
