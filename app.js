@@ -1,31 +1,35 @@
-// Enhanced YouTube Watch Together Application
-class YouTubeWatchTogether {
+// app.js (UPDATED for WebRTC Video Chat)
+// Note: This updated file assumes the corresponding HTML elements (localVideo, remoteVideos) 
+// and auth logic exist as required by the combined code structure.
+
+class VideoChatApplication {
     constructor() {
         this.socket = null;
-        this.peerConnection = null;
-        this.dataChannel = null;
-        this.player = null;
+        this.localStream = null;
+        this.peers = {}; // Map to store RTCPeerConnection instances
+        this.player = null; // Kept for structural consistency, but player functions removed
         this.roomId = this.generateRoomId();
         this.isConnected = false;
-        this.isOfferer = false;
         this.currentUser = null;
         
         this.init();
     }
 
-    init() {
+    async init() {
         this.currentUser = AuthManager.checkAuth();
         if (!this.currentUser) return;
         
         this.updateUserInterface();
         this.setupEventListeners();
         this.showRoomInfo();
-        
-        this.initializeYouTubePlayer();
+
+        await this.getMediaStream();
         
         this.initializeSocket();
         this.applySavedTheme();
     }
+    
+    // --- Media and UI Setup ---
 
     updateUserInterface() {
         const userAvatarSpan = document.querySelector('.user-avatar span');
@@ -37,6 +41,32 @@ class YouTubeWatchTogether {
         
         if (usernameElement) {
             usernameElement.textContent = this.currentUser.username;
+        }
+        
+        // Assume an HTML element with id 'localVideo' exists in app.html
+        const localVideo = document.getElementById("localVideo");
+        if (localVideo && this.localStream) {
+            localVideo.srcObject = this.localStream;
+        }
+    }
+    
+    async getMediaStream() {
+        try {
+            // Request video and audio permissions
+            this.localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            
+            const localVideoElement = document.getElementById("localVideo");
+            if (localVideoElement) {
+                localVideoElement.srcObject = this.localStream;
+                localVideoElement.autoplay = true;
+                localVideoElement.playsInline = true;
+                localVideoElement.muted = true; // Mute local video
+            } else {
+                this.showNotification('Could not find local video element. Check app.html.', 'error');
+            }
+        } catch (error) {
+            console.error("Error accessing media devices:", error);
+            this.showNotification('Error accessing video/mic. Please grant permissions.', 'error');
         }
     }
 
@@ -58,10 +88,7 @@ class YouTubeWatchTogether {
     }
 
     setupEventListeners() {
-        document.getElementById('loadVideo')?.addEventListener('click', () => this.loadVideo());
-        document.getElementById('videoUrl')?.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') this.loadVideo();
-        });
+        // Removed loadVideo functionality - not relevant for video chat app
         document.getElementById('connectBtn')?.addEventListener('click', () => this.toggleConnection());
         document.getElementById('sendMessage')?.addEventListener('click', () => this.sendChatMessage());
         document.getElementById('messageInput')?.addEventListener('keypress', (e) => {
@@ -91,64 +118,47 @@ class YouTubeWatchTogether {
         });
     }
 
+    // --- Signaling and Connection (WebRTC Peer & Socket) ---
+
     initializeSocket() {
-        // FIX: Use io() without arguments to connect dynamically to the host serving the HTML, 
-        // which works both locally and after deployment (e.g., on Render).
-        this.socket = io(); 
+        // FIX: Hardcoded to localhost:5000 as requested in the new code block
+        this.socket = io("http://localhost:5000"); 
 
         this.socket.on('connect', () => {
             this.showNotification('Connected to signaling server', 'success');
-            // Log for debugging step 1:
-            console.log("✅ Connected to signaling server:", this.socket.id);
             this.socket.emit('join-room', this.roomId);
             this.updateConnectionStatus(false);
         });
 
+        this.socket.on('room-users', (users) => {
+            users.forEach((userId) => {
+                // Initiator is true for existing users
+                this.createPeerConnection(userId, true);
+            });
+        });
+        
         this.socket.on('user-joined', (userId) => {
             this.addChatMessage('System', 'A peer joined the room', true);
-            this.showNotification('Peer joined the room', 'info');
-        });
-
-        this.socket.on('room-users', (users) => {
-            this.isOfferer = users.length === 0;
-            
-            if (users.length > 0) {
-                this.addChatMessage('System', `Found ${users.length} peer(s) in the room`, true);
-                
-                // FIX: If this client is the designated Offeror (first in room) 
-                // AND has not yet initiated the connection, start the process.
-                if (this.isOfferer && !this.peerConnection) {
-                     this.connect(); 
-                }
-            }
+            // Initiator is true for new users
+            this.createPeerConnection(userId, true);
         });
 
         this.socket.on('user-left', (userId) => {
+            this.removePeer(userId);
             this.addChatMessage('System', 'A peer disconnected', true);
             this.showNotification('Peer disconnected', 'info');
-            this.updateConnectionStatus(false);
         });
 
         this.socket.on('offer', async (data) => {
-            console.log("📥 Received offer...");
-            await this.handleOffer(data.offer, data.sender);
+            await this.handleOffer(data);
         });
 
         this.socket.on('answer', async (data) => {
-            console.log("📥 Received answer...");
-            await this.handleAnswer(data.answer);
+            await this.handleAnswer(data);
         });
 
         this.socket.on('ice-candidate', async (data) => {
-            if (this.peerConnection) {
-                await this.handleIceCandidate(data.candidate);
-            }
-        });
-
-        this.socket.on('video-state', (data) => {
-            if (this.player && data.sender !== this.socket.id) {
-                this.handleVideoStateChange(data);
-            }
+            await this.handleIceCandidate(data);
         });
 
         this.socket.on('chat-message', (data) => {
@@ -160,123 +170,37 @@ class YouTubeWatchTogether {
             this.updateConnectionStatus(false);
         });
     }
-
-    initializeYouTubePlayer() {
-        window.onYouTubeIframeAPIReady = () => {
-            this.createPlayer();
-        };
-        if (window.YT && window.YT.Player && !this.player) {
-             this.createPlayer();
+    
+    toggleConnection() {
+        // Since WebRTC video chat automatically tries to connect peers when they join, 
+        // this button is now repurposed to disconnect all peers and stop local media.
+        if (this.localStream) {
+            this.localStream.getTracks().forEach(track => track.stop());
+            this.localStream = null;
         }
+
+        // Close all existing peer connections
+        Object.keys(this.peers).forEach(userId => this.removePeer(userId));
+
+        if (this.socket) {
+            this.socket.disconnect();
+        }
+        
+        this.updateConnectionStatus(false);
+        this.showNotification('Video session ended.', 'info');
     }
     
-    createPlayer() {
-        const playerElement = document.getElementById('player');
-        if (!playerElement) return;
-
-        this.player = new YT.Player('player', {
-            height: '100%',
-            width: '100%',
-            playerVars: {
-                'playsinline': 1,
-                'controls': 1,
-                'rel': 0,
-                'modestbranding': 1,
-                'disablekb': 1,
-            },
-            events: {
-                'onStateChange': (e) => this.onPlayerStateChange(e),
-                'onReady': (e) => this.onPlayerReady(e),
-                'onError': (e) => this.onPlayerError(e)
+    removePeer(userId) {
+        if (this.peers[userId]) {
+            this.peers[userId].close();
+            delete this.peers[userId];
+            document.getElementById(userId)?.remove();
+            
+            // Check if any peer is left to update connection status
+            if (Object.keys(this.peers).length === 0) {
+                 this.updateConnectionStatus(false);
             }
-        });
-    }
-
-    loadVideo() {
-        const url = document.getElementById('videoUrl').value.trim();
-        if (!url) {
-            this.showNotification('Please enter a YouTube URL', 'error');
-            return;
         }
-        
-        if (!this.player || !this.player.loadVideoById) {
-            this.showNotification('YouTube player is not ready yet. Please wait for initialization.', 'error');
-            return;
-        }
-
-        const videoId = this.extractVideoId(url);
-        if (videoId) {
-            const loadBtn = document.getElementById('loadVideo');
-            const originalHtml = loadBtn.innerHTML;
-            loadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading...';
-            loadBtn.disabled = true;
-
-            try {
-                this.player.loadVideoById(videoId);
-                this.addChatMessage('System', `Video loaded: ${videoId}`, true);
-                
-                const playerOverlay = document.getElementById('playerOverlay');
-                if (playerOverlay) {
-                    playerOverlay.classList.add('hidden');
-                }
-                this.showNotification('Video loaded successfully', 'success');
-                
-            } catch (error) {
-                this.showNotification('Error loading video. Player state invalid.', 'error');
-            } finally {
-                setTimeout(() => {
-                    loadBtn.innerHTML = originalHtml;
-                    loadBtn.disabled = false;
-                }, 1000);
-            }
-
-        } else {
-            this.addChatMessage('System', 'Invalid YouTube URL format', true);
-            this.showNotification('Invalid YouTube URL', 'error');
-        }
-    }
-
-    extractVideoId(url) {
-        const regExp = /^.*((youtu.be\/)|(v\/)|(\/u\/\w\/)|(embed\/)|(watch\?))\??v?=?([^#&?]*).*/;
-        const match = url.match(regExp);
-        return (match && match[7] && match[7].length === 11) ? match[7] : null;
-    }
-
-    toggleConnection() {
-        if (this.isConnected) {
-            this.disconnect();
-        } else {
-            this.connect();
-        }
-    }
-
-    connect() {
-        if (!this.peerConnection) {
-            console.log("📡 Creating RTCPeerConnection...");
-            this.setupPeerConnection();
-            const connectBtn = document.getElementById('connectBtn');
-            connectBtn.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Connecting...';
-            connectBtn.classList.add('connecting');
-            this.addChatMessage('System', 'Attempting to connect to peers...', true);
-            this.showNotification('Connecting to peers...', 'info');
-        }
-    }
-
-    disconnect() {
-        if (this.peerConnection) {
-            this.peerConnection.close();
-            this.peerConnection = null;
-        }
-        if (this.dataChannel) {
-            this.dataChannel.close();
-            this.dataChannel = null;
-        }
-        
-        const connectBtn = document.getElementById('connectBtn');
-        connectBtn.innerHTML = '<i class="fas fa-plug"></i> Connect to Peers';
-        connectBtn.classList.remove('connected', 'connecting');
-        this.updateConnectionStatus(false);
-        this.addChatMessage('System', 'Disconnected from peers', true);
     }
 
     updateConnectionStatus(connected) {
@@ -299,232 +223,130 @@ class YouTubeWatchTogether {
 
         if (connectBtn) {
              if (connected) {
-                connectBtn.innerHTML = '<i class="fas fa-unlink"></i> Disconnect Peers';
+                connectBtn.innerHTML = '<i class="fas fa-unlink"></i> Stop Video Chat';
                 connectBtn.classList.add('connected');
                 connectBtn.classList.remove('connecting');
             } else {
-                connectBtn.innerHTML = '<i class="fas fa-plug"></i> Connect to Peers';
+                connectBtn.innerHTML = '<i class="fas fa-plug"></i> Start Video Chat';
                 connectBtn.classList.remove('connected', 'connecting');
             }
         }
     }
+    
+    createPeerConnection(userId, initiator) {
+        if (this.peers[userId]) return this.peers[userId];
+        if (!this.localStream) {
+            this.showNotification('Local media not available.', 'error');
+            return null;
+        }
 
-    setupPeerConnection() {
-        const configuration = {
-            iceServers: [
-                // Robust STUN servers for improved connection reliability
+        const peer = new RTCPeerConnection({
+             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' },
-                { urls: 'stun:stun3.l.google.com:19302' },
-                { urls: 'stun:stun4.l.google.com:19302' },
-                { urls: 'stun:stun.services.mozilla.com' },
-                { urls: 'stun:global.stun.twilio.com:3478' }
+                { urls: 'stun:stun2.l.google.com:19302' }
             ]
-        };
+        });
+        this.peers[userId] = peer;
         
-        this.peerConnection = new RTCPeerConnection(configuration);
-        
-        this.dataChannel = this.peerConnection.createDataChannel('chat', { negotiated: true, id: 0 });
-        this.setupDataChannel();
-        
-        this.peerConnection.ondatachannel = (event) => {
-            this.dataChannel = event.channel;
-            this.setupDataChannel();
-        };
-        
-        this.peerConnection.onicecandidate = (event) => {
-            if (event.candidate && this.socket) {
-                console.log("📤 Sending ICE candidate...");
-                this.socket.emit('ice-candidate', {
-                    target: this.roomId,
-                    candidate: event.candidate
-                });
-            }
-        };
-        
-        this.peerConnection.onconnectionstatechange = () => {
-            if (this.peerConnection.connectionState === 'connected') {
+        // Add local stream tracks to peer connection
+        this.localStream.getTracks().forEach((track) => {
+            peer.addTrack(track, this.localStream);
+        });
+
+        // Handle remote stream
+        peer.ontrack = (event) => {
+            let video = document.getElementById(userId);
+            if (!video) {
+                // Create a new video element for the remote stream
+                const remoteVideosContainer = document.querySelector(".video-section"); 
+                video = document.createElement("video");
+                video.id = userId;
+                video.autoplay = true;
+                video.playsInline = true;
+                video.classList.add("remote-video");
+                remoteVideosContainer.appendChild(video);
                 this.updateConnectionStatus(true);
-                this.addChatMessage('System', 'Peer connected successfully', true);
-            } else if (this.peerConnection.connectionState === 'disconnected' || 
-                       this.peerConnection.connectionState === 'failed') {
-                this.updateConnectionStatus(false);
-                this.addChatMessage('System', 'Peer connection failed or lost', true);
+            }
+            video.srcObject = event.streams[0];
+        };
+
+        // ICE candidate
+        peer.onicecandidate = (event) => {
+            if (event.candidate) {
+                this.socket.emit("ice-candidate", { candidate: event.candidate, target: userId });
             }
         };
         
-        // This event triggers negotiation when changes occur (like data channel creation)
-        this.peerConnection.onnegotiationneeded = async () => {
-            if (this.isOfferer) {
-                await this.createOffer();
-            }
-        };
-    }
-
-    setupDataChannel() {
-        this.dataChannel.onopen = () => {
-            this.addChatMessage('System', 'Chat data channel opened', true);
-        };
-        
-        this.dataChannel.onmessage = (event) => {
-            try {
-                const message = JSON.parse(event.data);
-                this.addChatMessage(message.username, message.text, false);
-            } catch (e) {
-                console.error('Error parsing message:', e);
-            }
-        };
-    }
-
-    async createOffer() {
-        if (!this.peerConnection) return;
-        
-        try {
-            console.log("📤 Sending offer...");
-            const offer = await this.peerConnection.createOffer();
-            await this.peerConnection.setLocalDescription(offer);
-            
-            this.socket.emit('offer', { target: this.roomId, offer: offer });
-        } catch (error) {
-            this.showNotification('Error creating connection offer', 'error');
-        }
-    }
-
-    async handleOffer(offer, senderId) {
-        if (!this.peerConnection) {
-            this.setupPeerConnection();
-        }
-        
-        try {
-            await this.peerConnection.setRemoteDescription(offer);
-            const answer = await this.peerConnection.createAnswer();
-            await this.peerConnection.setLocalDescription(answer);
-            
-            console.log("📤 Sending answer...");
-            this.socket.emit('answer', { target: senderId, answer: answer });
-        } catch (error) {
-            // Ignore error adding remote description
-        }
-    }
-
-    async handleAnswer(answer) {
-        try {
-            await this.peerConnection.setRemoteDescription(answer);
-        } catch (error) {
-            // Ignore error handling answer
-        }
-    }
-
-    async handleIceCandidate(candidate) {
-        try {
-            if (this.peerConnection) {
-                await this.peerConnection.addIceCandidate(candidate);
-            }
-        } catch (error) {
-            // Ignore error adding ICE candidate
-        }
-    }
-
-    onPlayerReady(event) {
-        const playerOverlay = document.getElementById('playerOverlay');
-        if (playerOverlay) {
-            playerOverlay.classList.add('hidden');
-        }
-    }
-
-    onPlayerStateChange(event) {
-        if (!this.isConnected || window.ignorePlayerStateChange) {
-            window.ignorePlayerStateChange = false;
-            return;
-        }
-        
-        try {
-            const state = {
-                sender: this.socket.id,
-                state: event.data,
-                currentTime: this.player.getCurrentTime(),
-                videoId: this.player.getVideoData().video_id
+        // If initiator, create offer
+        if (initiator) {
+            peer.onnegotiationneeded = async () => {
+                try {
+                    const offer = await peer.createOffer();
+                    await peer.setLocalDescription(offer);
+                    this.socket.emit("offer", { offer, target: userId });
+                } catch (error) {
+                    console.error("Error creating offer:", error);
+                }
             };
-            
-            if (state.state === YT.PlayerState.PLAYING || state.state === YT.PlayerState.PAUSED) {
-                this.socket.emit('video-state', {
-                    target: this.roomId,
-                    ...state
-                });
-            }
+        }
+
+        return peer;
+    }
+
+    async handleOffer(data) {
+        // Not initiator, so this client is the answerer
+        const peer = this.createPeerConnection(data.sender, false); 
+        
+        try {
+            await peer.setRemoteDescription(new RTCSessionDescription(data.offer));
+            const answer = await peer.createAnswer();
+            await peer.setLocalDescription(answer);
+            this.socket.emit("answer", { answer, target: data.sender });
         } catch (error) {
-            console.error("Error sending video state:", error);
+            console.error("Error handling offer:", error);
         }
     }
 
-    onPlayerError(event) {
-        console.error('YouTube player error:', event.data);
-        this.showNotification(`Youtubeer error: ${event.data}`, 'error');
-    }
-
-    handleVideoStateChange(data) {
-        if (!this.player) return;
-        
-        window.ignorePlayerStateChange = true;
-        
-        const playerState = this.player.getPlayerState();
-        
-        switch(data.state) {
-            case YT.PlayerState.PLAYING: 
-                if (Math.abs(this.player.getCurrentTime() - data.currentTime) > 2) {
-                    this.player.seekTo(data.currentTime, true);
-                }
-                if (playerState !== YT.PlayerState.PLAYING) {
-                    this.player.playVideo();
-                }
-                break;
-                
-            case YT.PlayerState.PAUSED: 
-                if (Math.abs(this.player.getCurrentTime() - data.currentTime) > 2) {
-                    this.player.seekTo(data.currentTime, true);
-                }
-                if (playerState !== YT.PlayerState.PAUSED) {
-                    this.player.pauseVideo();
-                }
-                break;
-                
-            case YT.PlayerState.CUED: 
-                if (this.player.getVideoData().video_id !== data.videoId) {
-                    this.player.loadVideoById(data.videoId);
-                }
-                break;
+    async handleAnswer(data) {
+        const peer = this.peers[data.sender];
+        if (peer) {
+            try {
+                await peer.setRemoteDescription(new RTCSessionDescription(data.answer));
+            } catch (error) {
+                 console.error("Error handling answer:", error);
+            }
         }
     }
+
+    async handleIceCandidate(data) {
+        const peer = this.peers[data.sender];
+        if (peer && data.candidate) {
+            try {
+                await peer.addIceCandidate(new RTCIceCandidate(data.candidate));
+            } catch (err) {
+                console.error("Error adding ICE candidate:", err);
+            }
+        }
+    }
+    
+    // --- Chat Functionality ---
 
     sendChatMessage() {
         const messageInput = document.getElementById('messageInput');
         const message = messageInput.value.trim();
         if (!message) return;
 
-        const messageData = {
-            username: this.currentUser.username,
-            text: message,
-            timestamp: new Date().toLocaleTimeString()
-        };
+        const timestamp = new Date().toLocaleTimeString();
+        this.addChatMessage(this.currentUser.username, message, false, true);
 
-        if (this.dataChannel && this.dataChannel.readyState === 'open') {
-            this.dataChannel.send(JSON.stringify(messageData));
-            this.addChatMessage('You', message, false, true);
-        } 
-        else if (this.socket && this.socket.connected) {
-            this.socket.emit('chat-message', {
-                target: this.roomId,
-                message: message,
-                username: this.currentUser.username,
-                timestamp: messageData.timestamp
-            });
-            this.addChatMessage('You', message, false, true);
-        } 
-        else {
-            this.addChatMessage('You', message, false, true);
-            this.showNotification('No peers connected. Message sent locally only.', 'warning');
-        }
+        // Send chat message via Socket.IO to all peers in the room
+        this.socket.emit('chat-message', {
+            target: this.roomId,
+            message: message,
+            username: this.currentUser.username,
+            timestamp: timestamp
+        });
 
         messageInput.value = '';
     }
@@ -563,8 +385,9 @@ class YouTubeWatchTogether {
         chatMessages.appendChild(messageElement);
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
+    
+    // --- UI/UX Helpers (Retained) ---
 
-    // UI/UX Helpers
     toggleTheme() {
         const themeToggle = document.getElementById('themeToggle');
         const isLight = document.documentElement.classList.toggle('light-theme');
@@ -647,8 +470,9 @@ class YouTubeWatchTogether {
     }
 }
 
+// Rename the application initialization to reflect the new functionality
 document.addEventListener('DOMContentLoaded', () => {
     if (document.querySelector('.app-container')) {
-        new YouTubeWatchTogether();
+        new VideoChatApplication();
     }
 });
