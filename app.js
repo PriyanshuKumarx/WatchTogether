@@ -9,6 +9,7 @@ class YouTubeWatchTogether {
         this.isConnected = false;
         this.isOfferer = false;
         this.currentUser = null;
+        this.socketInitialized = false;
         
         this.init();
     }
@@ -23,21 +24,30 @@ class YouTubeWatchTogether {
         
         this.initializeYouTubePlayer();
         
-        // FIXED: Initialize socket.io after the script is loaded
-        if (typeof io !== 'undefined') {
-            this.initializeSocket();
-        } else {
-            // Wait for socket.io to be loaded
-            setTimeout(() => {
-                if (typeof io !== 'undefined') {
-                    this.initializeSocket();
-                } else {
-                    this.showNotification('Failed to load socket.io. Please refresh the page.', 'error');
-                }
-            }, 1000);
-        }
+        // Initialize socket.io with retry mechanism
+        this.initializeSocketWithRetry();
         
         this.applySavedTheme();
+    }
+
+    initializeSocketWithRetry() {
+        const maxRetries = 5;
+        let retryCount = 0;
+        
+        const tryConnect = () => {
+            if (typeof io !== 'undefined') {
+                this.initializeSocket();
+                this.socketInitialized = true;
+            } else if (retryCount < maxRetries) {
+                retryCount++;
+                console.log(`Socket.io not loaded yet, retrying (${retryCount}/${maxRetries})...`);
+                setTimeout(tryConnect, 1000);
+            } else {
+                this.showNotification('Failed to load socket.io. Please refresh the page.', 'error');
+            }
+        };
+        
+        tryConnect();
     }
 
     updateUserInterface() {
@@ -105,13 +115,11 @@ class YouTubeWatchTogether {
     }
 
     initializeSocket() {
-        // FIXED: Use io() without arguments to connect dynamically to the host serving the HTML, 
-        // which works both locally and after deployment (e.g., on Render).
+        // Use io() without arguments to connect dynamically to the host serving the HTML
         this.socket = io(); 
 
         this.socket.on('connect', () => {
             this.showNotification('Connected to signaling server', 'success');
-            // Log for debugging step 1:
             console.log("✅ Connected to signaling server:", this.socket.id);
             this.socket.emit('join-room', this.roomId);
             this.updateConnectionStatus(false);
@@ -128,7 +136,7 @@ class YouTubeWatchTogether {
             if (users.length > 0) {
                 this.addChatMessage('System', `Found ${users.length} peer(s) in the room`, true);
                 
-                // FIXED: If this client is the designated Offeror (first in room) 
+                // If this client is the designated Offeror (first in room) 
                 // AND has not yet initiated the connection, start the process.
                 if (this.isOfferer && !this.peerConnection) {
                      this.connect(); 
@@ -264,6 +272,11 @@ class YouTubeWatchTogether {
     }
 
     connect() {
+        if (!this.socketInitialized) {
+            this.showNotification('Socket connection not established yet. Please wait...', 'warning');
+            return;
+        }
+        
         if (!this.peerConnection) {
             console.log("📡 Creating RTCPeerConnection...");
             this.setupPeerConnection();
@@ -338,7 +351,7 @@ class YouTubeWatchTogether {
         
         this.peerConnection = new RTCPeerConnection(configuration);
         
-        // FIXED: Create data channel with proper options
+        // Create data channel with proper options
         this.dataChannel = this.peerConnection.createDataChannel('chat', { 
             ordered: true,
             maxRetransmits: 3
@@ -372,7 +385,7 @@ class YouTubeWatchTogether {
             }
         };
         
-        // FIXED: Properly handle negotiation needed
+        // Properly handle negotiation needed
         this.peerConnection.onnegotiationneeded = async () => {
             console.log("Negotiation needed");
             if (this.isOfferer) {

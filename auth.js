@@ -1,7 +1,7 @@
 // Authentication functionality (Client-side)
 
-// ✅ FIXED: Set the correct base URL for the deployed API service
-const API_BASE_URL = window.location.origin; // Use the same origin as the frontend
+// Use the same origin as the frontend
+const API_BASE_URL = window.location.origin;
 
 class AuthManager {
     constructor() {

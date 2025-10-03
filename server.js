@@ -6,7 +6,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const cors = require('cors'); 
-const dotenv = require('dotenv'); // 🔑 NEW: Require dotenv
+const dotenv = require('dotenv');
 
 // Load environment variables from .env file
 dotenv.config();
@@ -18,7 +18,7 @@ const PORT = process.env.PORT || 3000;
 // --- Security and Storage Setup ---
 const users = new Map();
 const rooms = new Map();
-// 🔑 FIXED: Read the JWT_SECRET from the environment. Use a non-sensitive fallback only if process.env.JWT_SECRET is missing.
+// Read the JWT_SECRET from the environment. Use a non-sensitive fallback only if process.env.JWT_SECRET is missing.
 const JWT_SECRET = process.env.JWT_SECRET || 'development-fallback-key-do-not-use-in-prod'; 
 
 // --- CORS Configuration ---
@@ -26,11 +26,14 @@ const allowedOrigins = [
     'http://127.0.0.1:5500', 
     'http://localhost:5500',
     'http://127.0.0.1:3000', 
-    'http://localhost:3000'
+    'http://localhost:3000',
+    // Add your deployed frontend URL
+    'https://syncstream-app.onrender.com'
 ];
 
 const corsOptions = {
     origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
         if (!origin || allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
@@ -100,7 +103,7 @@ app.post('/api/auth/signup', async (req, res) => {
 
         const token = jwt.sign(
             { id: user.id, email: user.email, username: user.username },
-            JWT_SECRET, // Using the securely loaded secret
+            JWT_SECRET,
             { expiresIn: '24h' }
         );
 
@@ -134,7 +137,7 @@ app.post('/api/auth/signin', async (req, res) => {
 
         const token = jwt.sign(
             { id: user.id, email: user.email, username: user.username },
-            JWT_SECRET, // Using the securely loaded secret
+            JWT_SECRET,
             { expiresIn: '24h' }
         );
 
@@ -148,7 +151,7 @@ app.post('/api/auth/signin', async (req, res) => {
     }
 });
 
-// --- Socket.io Connection Handling (Unchanged) ---
+// --- Socket.io Connection Handling ---
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
@@ -166,13 +169,31 @@ io.on('connection', (socket) => {
         socket.to(roomId).emit('user-joined', socket.id);
     });
 
-    socket.on('offer', (data) => { socket.to(data.target).emit('offer', { offer: data.offer, sender: socket.id }); });
-    socket.on('answer', (data) => { socket.to(data.target).emit('answer', { answer: data.answer, sender: socket.id }); });
-    socket.on('ice-candidate', (data) => { socket.to(data.target).emit('ice-candidate', { candidate: data.candidate, sender: socket.id }); });
-    socket.on('video-state', (data) => { socket.to(socket.roomId).emit('video-state', { ...data, sender: socket.id }); });
-    socket.on('chat-message', (data) => { socket.to(socket.roomId).emit('chat-message', { username: data.username, text: data.message, timestamp: data.timestamp }); });
+    socket.on('offer', (data) => { 
+        console.log('Received offer from', socket.id, 'to', data.target);
+        socket.to(data.target).emit('offer', { offer: data.offer, sender: socket.id }); 
+    });
+    
+    socket.on('answer', (data) => { 
+        console.log('Received answer from', socket.id, 'to', data.target);
+        socket.to(data.target).emit('answer', { answer: data.answer, sender: socket.id }); 
+    });
+    
+    socket.on('ice-candidate', (data) => { 
+        console.log('Received ICE candidate from', socket.id, 'to', data.target);
+        socket.to(data.target).emit('ice-candidate', { candidate: data.candidate, sender: socket.id }); 
+    });
+    
+    socket.on('video-state', (data) => { 
+        socket.to(socket.roomId).emit('video-state', { ...data, sender: socket.id }); 
+    });
+    
+    socket.on('chat-message', (data) => { 
+        socket.to(socket.roomId).emit('chat-message', { username: data.username, text: data.message, timestamp: data.timestamp }); 
+    });
 
     socket.on('disconnect', () => {
+        console.log('User disconnected:', socket.id);
         if (socket.roomId) {
             const room = rooms.get(socket.roomId);
             if (room) {
