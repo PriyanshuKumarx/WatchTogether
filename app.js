@@ -10,6 +10,8 @@ class YouTubeWatchTogether {
         this.isOfferer = false;
         this.currentUser = null;
         this.socketInitialized = false;
+        this.peers = new Map(); // Track multiple peers
+        this.myPeerId = null;
         
         this.init();
     }
@@ -119,6 +121,7 @@ class YouTubeWatchTogether {
         this.socket = io(); 
 
         this.socket.on('connect', () => {
+            this.myPeerId = this.socket.id;
             this.showNotification('Connected to signaling server', 'success');
             console.log("✅ Connected to signaling server:", this.socket.id);
             this.socket.emit('join-room', this.roomId);
@@ -126,48 +129,51 @@ class YouTubeWatchTogether {
         });
 
         this.socket.on('user-joined', (userId) => {
-            this.addChatMessage('System', 'A peer joined the room', true);
+            this.addChatMessage('System', `User ${userId} joined the room`, true);
             this.showNotification('Peer joined the room', 'info');
+            // Create a new peer connection for this user
+            this.createPeerConnection(userId, true);
         });
 
         this.socket.on('room-users', (users) => {
-            this.isOfferer = users.length === 0;
-            
-            if (users.length > 0) {
-                this.addChatMessage('System', `Found ${users.length} peer(s) in the room`, true);
-                
-                // If this client is the designated Offeror (first in room) 
-                // AND has not yet initiated the connection, start the process.
-                if (this.isOfferer && !this.peerConnection) {
-                     this.connect(); 
+            console.log('Users in room:', users);
+            // Connect to existing users
+            users.forEach(userId => {
+                if (userId !== this.myPeerId && !this.peers.has(userId)) {
+                    this.createPeerConnection(userId, false);
                 }
-            }
+            });
         });
 
         this.socket.on('user-left', (userId) => {
-            this.addChatMessage('System', 'A peer disconnected', true);
+            this.addChatMessage('System', `User ${userId} disconnected`, true);
             this.showNotification('Peer disconnected', 'info');
-            this.updateConnectionStatus(false);
+            // Clean up the peer connection
+            if (this.peers.has(userId)) {
+                const peerConnection = this.peers.get(userId);
+                peerConnection.close();
+                this.peers.delete(userId);
+            }
+            this.updateConnectionStatus(this.peers.size > 0);
         });
 
         this.socket.on('offer', async (data) => {
-            console.log("📥 Received offer...");
+            console.log("📥 Received offer from", data.sender);
             await this.handleOffer(data.offer, data.sender);
         });
 
         this.socket.on('answer', async (data) => {
-            console.log("📥 Received answer...");
-            await this.handleAnswer(data.answer);
+            console.log("📥 Received answer from", data.sender);
+            await this.handleAnswer(data.answer, data.sender);
         });
 
         this.socket.on('ice-candidate', async (data) => {
-            if (this.peerConnection) {
-                await this.handleIceCandidate(data.candidate);
-            }
+            console.log("📥 Received ICE candidate from", data.sender);
+            await this.handleIceCandidate(data.candidate, data.sender);
         });
 
         this.socket.on('video-state', (data) => {
-            if (this.player && data.sender !== this.socket.id) {
+            if (this.player && data.sender !== this.myPeerId) {
                 this.handleVideoStateChange(data);
             }
         });
@@ -180,6 +186,159 @@ class YouTubeWatchTogether {
             this.showNotification('Disconnected from server', 'error');
             this.updateConnectionStatus(false);
         });
+    }
+
+    createPeerConnection(userId, isInitiator) {
+        console.log(`Creating peer connection for user ${userId}, initiator: ${isInitiator}`);
+        
+        const configuration = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' },
+                { urls: 'stun:stun.services.mozilla.com' },
+                { urls: 'stun:global.stun.twilio.com:3478' }
+            ]
+        };
+        
+        const peerConnection = new RTCPeerConnection(configuration);
+        this.peers.set(userId, peerConnection);
+        
+        // Create data channel if we're the initiator
+        if (isInitiator) {
+            const dataChannel = peerConnection.createDataChannel('video-sync', { 
+                ordered: true,
+                maxRetransmits: 3
+            });
+            this.setupDataChannel(dataChannel, userId);
+        } else {
+            peerConnection.ondatachannel = (event) => {
+                this.setupDataChannel(event.channel, userId);
+            };
+        }
+        
+        peerConnection.onicecandidate = (event) => {
+            if (event.candidate && this.socket) {
+                console.log("📤 Sending ICE candidate to", userId);
+                this.socket.emit('ice-candidate', {
+                    target: userId,
+                    candidate: event.candidate
+                });
+            }
+        };
+        
+        peerConnection.onconnectionstatechange = () => {
+            console.log(`Connection state with ${userId} changed to:`, peerConnection.connectionState);
+            if (peerConnection.connectionState === 'connected') {
+                this.updateConnectionStatus(true);
+                this.addChatMessage('System', `Connected to peer ${userId}`, true);
+            } else if (peerConnection.connectionState === 'disconnected' || 
+                       peerConnection.connectionState === 'failed') {
+                this.updateConnectionStatus(this.peers.size > 0);
+                this.addChatMessage('System', `Connection to peer ${userId} failed or lost`, true);
+            }
+        };
+        
+        // Start the connection process if we're the initiator
+        if (isInitiator) {
+            this.createOffer(userId);
+        }
+    }
+
+    setupDataChannel(dataChannel, userId) {
+        dataChannel.onopen = () => {
+            console.log(`Data channel opened with ${userId}`);
+            this.addChatMessage('System', `Data channel opened with peer ${userId}`, true);
+        };
+        
+        dataChannel.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'video-state') {
+                    this.handleVideoStateChange(data.payload);
+                } else if (data.type === 'chat') {
+                    this.addChatMessage(data.payload.username, data.payload.text, false);
+                }
+            } catch (e) {
+                console.error('Error parsing message:', e);
+            }
+        };
+        
+        dataChannel.onerror = (error) => {
+            console.error(`Data channel error with ${userId}:`, error);
+        };
+        
+        dataChannel.onclose = () => {
+            console.log(`Data channel closed with ${userId}`);
+            this.addChatMessage('System', `Data channel closed with peer ${userId}`, true);
+        };
+    }
+
+    async createOffer(userId) {
+        const peerConnection = this.peers.get(userId);
+        if (!peerConnection) return;
+        
+        try {
+            console.log(`📤 Creating offer for ${userId}`);
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            
+            this.socket.emit('offer', { 
+                target: userId, 
+                offer: offer 
+            });
+        } catch (error) {
+            console.error(`Error creating offer for ${userId}:`, error);
+            this.showNotification('Error creating connection offer', 'error');
+        }
+    }
+
+    async handleOffer(offer, senderId) {
+        const peerConnection = this.peers.get(senderId);
+        if (!peerConnection) {
+            this.createPeerConnection(senderId, false);
+        }
+        
+        try {
+            console.log(`📥 Setting remote description for ${senderId}`);
+            await this.peers.get(senderId).setRemoteDescription(offer);
+            const answer = await this.peers.get(senderId).createAnswer();
+            await this.peers.get(senderId).setLocalDescription(answer);
+            
+            console.log(`📤 Sending answer to ${senderId}`);
+            this.socket.emit('answer', { 
+                target: senderId, 
+                answer: answer 
+            });
+        } catch (error) {
+            console.error(`Error handling offer from ${senderId}:`, error);
+        }
+    }
+
+    async handleAnswer(answer, senderId) {
+        const peerConnection = this.peers.get(senderId);
+        if (!peerConnection) return;
+        
+        try {
+            console.log(`📥 Setting remote description (answer) for ${senderId}`);
+            await peerConnection.setRemoteDescription(answer);
+        } catch (error) {
+            console.error(`Error handling answer from ${senderId}:`, error);
+        }
+    }
+
+    async handleIceCandidate(candidate, senderId) {
+        const peerConnection = this.peers.get(senderId);
+        if (!peerConnection) return;
+        
+        try {
+            console.log(`📥 Adding ICE candidate from ${senderId}`);
+            await peerConnection.addIceCandidate(candidate);
+        } catch (error) {
+            console.error(`Error adding ICE candidate from ${senderId}:`, error);
+        }
     }
 
     initializeYouTubePlayer() {
@@ -277,32 +436,27 @@ class YouTubeWatchTogether {
             return;
         }
         
-        if (!this.peerConnection) {
-            console.log("📡 Creating RTCPeerConnection...");
-            this.setupPeerConnection();
-            const connectBtn = document.getElementById('connectBtn');
-            connectBtn.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Connecting...';
-            connectBtn.classList.add('connecting');
-            this.addChatMessage('System', 'Attempting to connect to peers...', true);
-            this.showNotification('Connecting to peers...', 'info');
+        this.addChatMessage('System', 'Attempting to connect to peers...', true);
+        this.showNotification('Connecting to peers...', 'info');
+        
+        // If we're already in a room, the connections should be handled by the socket events
+        if (this.peers.size === 0) {
+            this.showNotification('No other users in the room. Share the room link to invite others.', 'info');
         }
     }
 
     disconnect() {
-        if (this.peerConnection) {
-            this.peerConnection.close();
-            this.peerConnection = null;
-        }
-        if (this.dataChannel) {
-            this.dataChannel.close();
-            this.dataChannel = null;
-        }
+        // Close all peer connections
+        this.peers.forEach((peerConnection, userId) => {
+            peerConnection.close();
+        });
+        this.peers.clear();
         
         const connectBtn = document.getElementById('connectBtn');
         connectBtn.innerHTML = '<i class="fas fa-plug"></i> Connect to Peers';
         connectBtn.classList.remove('connected', 'connecting');
         this.updateConnectionStatus(false);
-        this.addChatMessage('System', 'Disconnected from peers', true);
+        this.addChatMessage('System', 'Disconnected from all peers', true);
     }
 
     updateConnectionStatus(connected) {
@@ -335,138 +489,6 @@ class YouTubeWatchTogether {
         }
     }
 
-    setupPeerConnection() {
-        const configuration = {
-            iceServers: [
-                // Robust STUN servers for improved connection reliability
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' },
-                { urls: 'stun:stun3.l.google.com:19302' },
-                { urls: 'stun:stun4.l.google.com:19302' },
-                { urls: 'stun:stun.services.mozilla.com' },
-                { urls: 'stun:global.stun.twilio.com:3478' }
-            ]
-        };
-        
-        this.peerConnection = new RTCPeerConnection(configuration);
-        
-        // Create data channel with proper options
-        this.dataChannel = this.peerConnection.createDataChannel('chat', { 
-            ordered: true,
-            maxRetransmits: 3
-        });
-        this.setupDataChannel();
-        
-        this.peerConnection.ondatachannel = (event) => {
-            this.dataChannel = event.channel;
-            this.setupDataChannel();
-        };
-        
-        this.peerConnection.onicecandidate = (event) => {
-            if (event.candidate && this.socket) {
-                console.log("📤 Sending ICE candidate...");
-                this.socket.emit('ice-candidate', {
-                    target: this.roomId,
-                    candidate: event.candidate
-                });
-            }
-        };
-        
-        this.peerConnection.onconnectionstatechange = () => {
-            console.log("Connection state changed to:", this.peerConnection.connectionState);
-            if (this.peerConnection.connectionState === 'connected') {
-                this.updateConnectionStatus(true);
-                this.addChatMessage('System', 'Peer connected successfully', true);
-            } else if (this.peerConnection.connectionState === 'disconnected' || 
-                       this.peerConnection.connectionState === 'failed') {
-                this.updateConnectionStatus(false);
-                this.addChatMessage('System', 'Peer connection failed or lost', true);
-            }
-        };
-        
-        // Properly handle negotiation needed
-        this.peerConnection.onnegotiationneeded = async () => {
-            console.log("Negotiation needed");
-            if (this.isOfferer) {
-                await this.createOffer();
-            }
-        };
-    }
-
-    setupDataChannel() {
-        this.dataChannel.onopen = () => {
-            this.addChatMessage('System', 'Chat data channel opened', true);
-        };
-        
-        this.dataChannel.onmessage = (event) => {
-            try {
-                const message = JSON.parse(event.data);
-                this.addChatMessage(message.username, message.text, false);
-            } catch (e) {
-                console.error('Error parsing message:', e);
-            }
-        };
-        
-        this.dataChannel.onerror = (error) => {
-            console.error('Data channel error:', error);
-        };
-        
-        this.dataChannel.onclose = () => {
-            this.addChatMessage('System', 'Chat data channel closed', true);
-        };
-    }
-
-    async createOffer() {
-        if (!this.peerConnection) return;
-        
-        try {
-            console.log("📤 Sending offer...");
-            const offer = await this.peerConnection.createOffer();
-            await this.peerConnection.setLocalDescription(offer);
-            
-            this.socket.emit('offer', { target: this.roomId, offer: offer });
-        } catch (error) {
-            console.error('Error creating offer:', error);
-            this.showNotification('Error creating connection offer', 'error');
-        }
-    }
-
-    async handleOffer(offer, senderId) {
-        if (!this.peerConnection) {
-            this.setupPeerConnection();
-        }
-        
-        try {
-            await this.peerConnection.setRemoteDescription(offer);
-            const answer = await this.peerConnection.createAnswer();
-            await this.peerConnection.setLocalDescription(answer);
-            
-            console.log("📤 Sending answer...");
-            this.socket.emit('answer', { target: senderId, answer: answer });
-        } catch (error) {
-            console.error('Error handling offer:', error);
-        }
-    }
-
-    async handleAnswer(answer) {
-        try {
-            await this.peerConnection.setRemoteDescription(answer);
-        } catch (error) {
-            console.error('Error handling answer:', error);
-        }
-    }
-
-    async handleIceCandidate(candidate) {
-        try {
-            if (this.peerConnection) {
-                await this.peerConnection.addIceCandidate(candidate);
-            }
-        } catch (error) {
-            console.error('Error adding ICE candidate:', error);
-        }
-    }
-
     onPlayerReady(event) {
         const playerOverlay = document.getElementById('playerOverlay');
         if (playerOverlay) {
@@ -482,16 +504,28 @@ class YouTubeWatchTogether {
         
         try {
             const state = {
-                sender: this.socket.id,
+                sender: this.myPeerId,
                 state: event.data,
                 currentTime: this.player.getCurrentTime(),
                 videoId: this.player.getVideoData().video_id
             };
             
             if (state.state === YT.PlayerState.PLAYING || state.state === YT.PlayerState.PAUSED) {
+                // Send through socket.io for reliability
                 this.socket.emit('video-state', {
                     target: this.roomId,
                     ...state
+                });
+                
+                // Also send through WebRTC data channels for lower latency
+                this.peers.forEach((peerConnection, userId) => {
+                    const dataChannel = peerConnection.getDataChannel?.('video-sync');
+                    if (dataChannel && dataChannel.readyState === 'open') {
+                        dataChannel.send(JSON.stringify({
+                            type: 'video-state',
+                            payload: state
+                        }));
+                    }
                 });
             }
         } catch (error) {
@@ -549,24 +583,26 @@ class YouTubeWatchTogether {
             timestamp: new Date().toLocaleTimeString()
         };
 
-        if (this.dataChannel && this.dataChannel.readyState === 'open') {
-            this.dataChannel.send(JSON.stringify(messageData));
-            this.addChatMessage('You', message, false, true);
-        } 
-        else if (this.socket && this.socket.connected) {
-            this.socket.emit('chat-message', {
-                target: this.roomId,
-                message: message,
-                username: this.currentUser.username,
-                timestamp: messageData.timestamp
-            });
-            this.addChatMessage('You', message, false, true);
-        } 
-        else {
-            this.addChatMessage('You', message, false, true);
-            this.showNotification('No peers connected. Message sent locally only.', 'warning');
-        }
-
+        // Send through socket.io for reliability
+        this.socket.emit('chat-message', {
+            target: this.roomId,
+            message: message,
+            username: this.currentUser.username,
+            timestamp: messageData.timestamp
+        });
+        
+        // Also send through WebRTC data channels for lower latency
+        this.peers.forEach((peerConnection, userId) => {
+            const dataChannel = peerConnection.getDataChannel?.('video-sync');
+            if (dataChannel && dataChannel.readyState === 'open') {
+                dataChannel.send(JSON.stringify({
+                    type: 'chat',
+                    payload: messageData
+                }));
+            }
+        });
+        
+        this.addChatMessage('You', message, false, true);
         messageInput.value = '';
     }
 
