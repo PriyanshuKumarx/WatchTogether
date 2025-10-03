@@ -12,6 +12,9 @@ class YouTubeWatchTogether {
         this.socketInitialized = false;
         this.peers = new Map(); // Track multiple peers
         this.myPeerId = null;
+        this.lastVideoState = null; // Track last video state to prevent duplicate events
+        this.syncThrottle = 100; // Throttle video sync events to prevent flooding
+        this.lastSyncTime = 0; // Track last sync time
         
         this.init();
     }
@@ -497,36 +500,58 @@ class YouTubeWatchTogether {
     }
 
     onPlayerStateChange(event) {
+        // Throttle video state changes to prevent flooding
+        const now = Date.now();
+        if (now - this.lastSyncTime < this.syncThrottle) {
+            return;
+        }
+        this.lastSyncTime = now;
+        
         if (!this.isConnected || window.ignorePlayerStateChange) {
             window.ignorePlayerStateChange = false;
             return;
         }
         
         try {
-            const state = {
-                sender: this.myPeerId,
+            const currentState = {
                 state: event.data,
                 currentTime: this.player.getCurrentTime(),
                 videoId: this.player.getVideoData().video_id
             };
             
-            if (state.state === YT.PlayerState.PLAYING || state.state === YT.PlayerState.PAUSED) {
-                // Send through socket.io for reliability
-                this.socket.emit('video-state', {
-                    target: this.roomId,
-                    ...state
-                });
+            // Only send if the state has actually changed
+            if (!this.lastVideoState || 
+                this.lastVideoState.state !== currentState.state ||
+                Math.abs(this.lastVideoState.currentTime - currentState.currentTime) > 0.5) {
                 
-                // Also send through WebRTC data channels for lower latency
-                this.peers.forEach((peerConnection, userId) => {
-                    const dataChannel = peerConnection.getDataChannel?.('video-sync');
-                    if (dataChannel && dataChannel.readyState === 'open') {
-                        dataChannel.send(JSON.stringify({
-                            type: 'video-state',
-                            payload: state
-                        }));
-                    }
-                });
+                this.lastVideoState = currentState;
+                
+                const state = {
+                    sender: this.myPeerId,
+                    ...currentState
+                };
+                
+                // Only send play/pause state changes immediately
+                if (state.state === YT.PlayerState.PLAYING || state.state === YT.PlayerState.PAUSED) {
+                    // Send through socket.io for reliability
+                    this.socket.emit('video-state', {
+                        target: this.roomId,
+                        ...state
+                    });
+                    
+                    // Also send through WebRTC data channels for lower latency
+                    this.peers.forEach((peerConnection, userId) => {
+                        const dataChannels = peerConnection.dataChannels || [];
+                        dataChannels.forEach(dataChannel => {
+                            if (dataChannel.readyState === 'open') {
+                                dataChannel.send(JSON.stringify({
+                                    type: 'video-state',
+                                    payload: state
+                                }));
+                            }
+                        });
+                    });
+                }
             }
         } catch (error) {
             console.error("Error sending video state:", error);
@@ -541,24 +566,30 @@ class YouTubeWatchTogether {
     handleVideoStateChange(data) {
         if (!this.player) return;
         
+        // Set flag to prevent echo
         window.ignorePlayerStateChange = true;
+        
+        // Clear the flag after a short delay
+        setTimeout(() => {
+            window.ignorePlayerStateChange = false;
+        }, 500);
         
         const playerState = this.player.getPlayerState();
         
+        // Always seek to the correct time first
+        if (Math.abs(this.player.getCurrentTime() - data.currentTime) > 0.5) {
+            this.player.seekTo(data.currentTime, true);
+        }
+        
+        // Then handle play/pause state
         switch(data.state) {
             case YT.PlayerState.PLAYING: 
-                if (Math.abs(this.player.getCurrentTime() - data.currentTime) > 2) {
-                    this.player.seekTo(data.currentTime, true);
-                }
                 if (playerState !== YT.PlayerState.PLAYING) {
                     this.player.playVideo();
                 }
                 break;
                 
             case YT.PlayerState.PAUSED: 
-                if (Math.abs(this.player.getCurrentTime() - data.currentTime) > 2) {
-                    this.player.seekTo(data.currentTime, true);
-                }
                 if (playerState !== YT.PlayerState.PAUSED) {
                     this.player.pauseVideo();
                 }
@@ -593,13 +624,15 @@ class YouTubeWatchTogether {
         
         // Also send through WebRTC data channels for lower latency
         this.peers.forEach((peerConnection, userId) => {
-            const dataChannel = peerConnection.getDataChannel?.('video-sync');
-            if (dataChannel && dataChannel.readyState === 'open') {
-                dataChannel.send(JSON.stringify({
-                    type: 'chat',
-                    payload: messageData
-                }));
-            }
+            const dataChannels = peerConnection.dataChannels || [];
+            dataChannels.forEach(dataChannel => {
+                if (dataChannel.readyState === 'open') {
+                    dataChannel.send(JSON.stringify({
+                        type: 'chat',
+                        payload: messageData
+                    }));
+                }
+            });
         });
         
         this.addChatMessage('You', message, false, true);
