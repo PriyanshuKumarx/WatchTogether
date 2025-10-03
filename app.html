@@ -38,6 +38,10 @@
                                 <i class="fas fa-share-alt"></i>
                                 Share Room Link
                             </button>
+                            <button class="dropdown-item" id="copyRoomId">
+                                <i class="fas fa-copy"></i>
+                                Copy Room ID
+                            </button>
                             <button class="dropdown-item" id="newRoom">
                                 <i class="fas fa-plus-circle"></i>
                                 New Room
@@ -58,10 +62,15 @@
                 <div class="control-card">
                     <div class="card-header">
                         <h3>Video Controls</h3>
-                        <span id="roomInfo" class="text-secondary" title="Click to copy Room ID">Room: loading...</span> 
+                        <div class="room-info">
+                            <span id="roomInfo" class="text-secondary" title="Click to copy Room ID">Room: loading...</span>
+                            <button id="copyRoomIdBtn" class="icon-btn btn-secondary" title="Copy Room ID">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                        </div>
                     </div>
                     <div class="card-body">
-                        <div class="input-group">
+                        <div id="videoUrlGroup" class="input-group">
                             <input type="text" id="videoUrl" placeholder="Paste YouTube URL here" title="YouTube Video URL">
                             <button id="loadVideo" class="btn btn-primary">
                                 <i class="fas fa-video"></i> Load Video
@@ -89,7 +98,7 @@
                 <div class="chat-card card">
                     <div class="card-header">
                         <h3><i class="fas fa-comments"></i> Live Chat</h3>
-                        <span id="onlineCount" class="text-secondary">0 online</span>
+                        <span id="onlineCount" class="text-secondary">1 online</span>
                     </div>
                     <div id="chatMessages" class="chat-messages">
                         <div class="chat-message system">

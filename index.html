@@ -41,7 +41,7 @@
                     Create watch parties, sync YouTube video playback perfectly, and chat live with friends from anywhere in the world.
                 </p>
                 <div class="hero-actions">
-                    <a href="auth.html?action=signup" class="btn btn-primary btn-large">
+                    <a href="#" id="startWatchParty" class="btn btn-primary btn-large">
                         <i class="fas fa-play-circle"></i>
                         Start Watch Party
                     </a>
@@ -182,7 +182,7 @@
             <div class="cta-content">
                 <h2>Ready to Start Your Watch Party?</h2>
                 <p>Join thousands of users already enjoying synchronized YouTube watching</p>
-                <a href="auth.html?action=signup" class="btn btn-primary btn-large">
+                <a href="#" id="startWatchParty2" class="btn btn-primary btn-large">
                     <i class="fas fa-users"></i>
                     Get Started Free
                 </a>
@@ -227,6 +227,132 @@
         </div>
     </footer>
 
+    <!-- Room/Join Modal -->
+    <div id="roomModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Start or Join a Watch Party</h2>
+                <span class="close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="room-options">
+                    <div class="room-option" id="createRoomOption">
+                        <div class="option-icon">
+                            <i class="fas fa-plus-circle"></i>
+                        </div>
+                        <h3>Create a Room</h3>
+                        <p>Start a new watch party and invite friends</p>
+                    </div>
+                    <div class="room-option" id="joinRoomOption">
+                        <div class="option-icon">
+                            <i class="fas fa-sign-in-alt"></i>
+                        </div>
+                        <h3>Join a Room</h3>
+                        <p>Enter a room ID to join an existing watch party</p>
+                    </div>
+                </div>
+                
+                <div id="createRoomForm" class="room-form hidden">
+                    <div class="form-group">
+                        <label for="videoUrl">YouTube Video URL</label>
+                        <input type="text" id="videoUrl" placeholder="Paste YouTube URL here">
+                    </div>
+                    <button id="createRoomBtn" class="btn btn-primary btn-full">
+                        <i class="fas fa-rocket"></i> Create Room
+                    </button>
+                </div>
+                
+                <div id="joinRoomForm" class="room-form hidden">
+                    <div class="form-group">
+                        <label for="roomId">Room ID</label>
+                        <input type="text" id="roomId" placeholder="Enter room ID">
+                    </div>
+                    <button id="joinRoomBtn" class="btn btn-primary btn-full">
+                        <i class="fas fa-sign-in-alt"></i> Join Room
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="auth.js"></script>
+    <script>
+        // Modal functionality
+        const modal = document.getElementById('roomModal');
+        const startWatchPartyBtns = document.querySelectorAll('#startWatchParty, #startWatchParty2');
+        const createRoomOption = document.getElementById('createRoomOption');
+        const joinRoomOption = document.getElementById('joinRoomOption');
+        const createRoomForm = document.getElementById('createRoomForm');
+        const joinRoomForm = document.getElementById('joinRoomForm');
+        const createRoomBtn = document.getElementById('createRoomBtn');
+        const joinRoomBtn = document.getElementById('joinRoomBtn');
+        const closeBtn = document.querySelector('.close');
+        
+        // Open modal when start watch party is clicked
+        startWatchPartyBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                modal.style.display = 'block';
+            });
+        });
+        
+        // Close modal when close button is clicked
+        closeBtn.addEventListener('click', () => {
+            modal.style.display = 'none';
+        });
+        
+        // Close modal when clicking outside of it
+        window.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+        
+        // Show create room form
+        createRoomOption.addEventListener('click', () => {
+            createRoomOption.classList.add('active');
+            joinRoomOption.classList.remove('active');
+            createRoomForm.classList.remove('hidden');
+            joinRoomForm.classList.add('hidden');
+        });
+        
+        // Show join room form
+        joinRoomOption.addEventListener('click', () => {
+            joinRoomOption.classList.add('active');
+            createRoomOption.classList.remove('active');
+            joinRoomForm.classList.remove('hidden');
+            createRoomForm.classList.add('hidden');
+        });
+        
+        // Create room button click
+        createRoomBtn.addEventListener('click', () => {
+            const videoUrl = document.getElementById('videoUrl').value.trim();
+            if (!videoUrl) {
+                alert('Please enter a YouTube URL');
+                return;
+            }
+            
+            // Generate a random room ID
+            const roomId = 'room-' + Math.random().toString(36).substr(2, 9);
+            
+            // Store the video URL in localStorage to be used in app.html
+            localStorage.setItem('videoUrl', videoUrl);
+            
+            // Redirect to app.html with the room ID
+            window.location.href = `app.html?room=${roomId}&action=create`;
+        });
+        
+        // Join room button click
+        joinRoomBtn.addEventListener('click', () => {
+            const roomId = document.getElementById('roomId').value.trim();
+            if (!roomId) {
+                alert('Please enter a room ID');
+                return;
+            }
+            
+            // Redirect to app.html with the room ID
+            window.location.href = `app.html?room=${roomId}&action=join`;
+        });
+    </script>
 </body>
 </html>
