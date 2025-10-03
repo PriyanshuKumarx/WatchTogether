@@ -110,8 +110,26 @@
     </div>
 
     <script src="https://www.youtube.com/iframe_api"></script> 
-    <script src="http://127.0.0.1:3000/socket.io/socket.io.js"></script>
+    <!-- FIXED: Use dynamic socket.io script that works in both development and production -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Determine the correct socket.io URL based on current environment
+            const socketIoScript = document.createElement('script');
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                socketIoScript.src = 'http://127.0.0.1:3000/socket.io/socket.io.js';
+            } else {
+                socketIoScript.src = window.location.origin + '/socket.io/socket.io.js';
+            }
+            document.head.appendChild(socketIoScript);
+            
+            socketIoScript.onload = function() {
+                // Load the app.js script after socket.io is loaded
+                const appScript = document.createElement('script');
+                appScript.src = 'app.js';
+                document.body.appendChild(appScript);
+            };
+        });
+    </script>
     <script src="auth.js"></script>
-    <script src="app.js"></script>
 </body>
 </html>

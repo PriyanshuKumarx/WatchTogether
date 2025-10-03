@@ -1,7 +1,7 @@
 // Authentication functionality (Client-side)
 
 // ✅ FIXED: Set the correct base URL for the deployed API service
-const API_BASE_URL = "https://syncstream-app.onrender.com";
+const API_BASE_URL = window.location.origin; // Use the same origin as the frontend
 
 class AuthManager {
     constructor() {

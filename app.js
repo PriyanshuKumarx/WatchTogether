@@ -23,7 +23,20 @@ class YouTubeWatchTogether {
         
         this.initializeYouTubePlayer();
         
-        this.initializeSocket();
+        // FIXED: Initialize socket.io after the script is loaded
+        if (typeof io !== 'undefined') {
+            this.initializeSocket();
+        } else {
+            // Wait for socket.io to be loaded
+            setTimeout(() => {
+                if (typeof io !== 'undefined') {
+                    this.initializeSocket();
+                } else {
+                    this.showNotification('Failed to load socket.io. Please refresh the page.', 'error');
+                }
+            }, 1000);
+        }
+        
         this.applySavedTheme();
     }
 
@@ -92,7 +105,7 @@ class YouTubeWatchTogether {
     }
 
     initializeSocket() {
-        // FIX: Use io() without arguments to connect dynamically to the host serving the HTML, 
+        // FIXED: Use io() without arguments to connect dynamically to the host serving the HTML, 
         // which works both locally and after deployment (e.g., on Render).
         this.socket = io(); 
 
@@ -115,7 +128,7 @@ class YouTubeWatchTogether {
             if (users.length > 0) {
                 this.addChatMessage('System', `Found ${users.length} peer(s) in the room`, true);
                 
-                // FIX: If this client is the designated Offeror (first in room) 
+                // FIXED: If this client is the designated Offeror (first in room) 
                 // AND has not yet initiated the connection, start the process.
                 if (this.isOfferer && !this.peerConnection) {
                      this.connect(); 
@@ -325,7 +338,11 @@ class YouTubeWatchTogether {
         
         this.peerConnection = new RTCPeerConnection(configuration);
         
-        this.dataChannel = this.peerConnection.createDataChannel('chat', { negotiated: true, id: 0 });
+        // FIXED: Create data channel with proper options
+        this.dataChannel = this.peerConnection.createDataChannel('chat', { 
+            ordered: true,
+            maxRetransmits: 3
+        });
         this.setupDataChannel();
         
         this.peerConnection.ondatachannel = (event) => {
@@ -344,6 +361,7 @@ class YouTubeWatchTogether {
         };
         
         this.peerConnection.onconnectionstatechange = () => {
+            console.log("Connection state changed to:", this.peerConnection.connectionState);
             if (this.peerConnection.connectionState === 'connected') {
                 this.updateConnectionStatus(true);
                 this.addChatMessage('System', 'Peer connected successfully', true);
@@ -354,8 +372,9 @@ class YouTubeWatchTogether {
             }
         };
         
-        // This event triggers negotiation when changes occur (like data channel creation)
+        // FIXED: Properly handle negotiation needed
         this.peerConnection.onnegotiationneeded = async () => {
+            console.log("Negotiation needed");
             if (this.isOfferer) {
                 await this.createOffer();
             }
@@ -375,6 +394,14 @@ class YouTubeWatchTogether {
                 console.error('Error parsing message:', e);
             }
         };
+        
+        this.dataChannel.onerror = (error) => {
+            console.error('Data channel error:', error);
+        };
+        
+        this.dataChannel.onclose = () => {
+            this.addChatMessage('System', 'Chat data channel closed', true);
+        };
     }
 
     async createOffer() {
@@ -387,6 +414,7 @@ class YouTubeWatchTogether {
             
             this.socket.emit('offer', { target: this.roomId, offer: offer });
         } catch (error) {
+            console.error('Error creating offer:', error);
             this.showNotification('Error creating connection offer', 'error');
         }
     }
@@ -404,7 +432,7 @@ class YouTubeWatchTogether {
             console.log("📤 Sending answer...");
             this.socket.emit('answer', { target: senderId, answer: answer });
         } catch (error) {
-            // Ignore error adding remote description
+            console.error('Error handling offer:', error);
         }
     }
 
@@ -412,7 +440,7 @@ class YouTubeWatchTogether {
         try {
             await this.peerConnection.setRemoteDescription(answer);
         } catch (error) {
-            // Ignore error handling answer
+            console.error('Error handling answer:', error);
         }
     }
 
@@ -422,7 +450,7 @@ class YouTubeWatchTogether {
                 await this.peerConnection.addIceCandidate(candidate);
             }
         } catch (error) {
-            // Ignore error adding ICE candidate
+            console.error('Error adding ICE candidate:', error);
         }
     }
 
@@ -460,7 +488,7 @@ class YouTubeWatchTogether {
 
     onPlayerError(event) {
         console.error('YouTube player error:', event.data);
-        this.showNotification(`Youtubeer error: ${event.data}`, 'error');
+        this.showNotification(`YouTube error: ${event.data}`, 'error');
     }
 
     handleVideoStateChange(data) {
