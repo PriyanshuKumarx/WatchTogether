@@ -15,8 +15,6 @@ class YouTubeWatchTogether {
         this.lastVideoState = null; // Track last video state to prevent duplicate events
         this.syncThrottle = 100; // Throttle video sync events to prevent flooding
         this.lastSyncTime = 0; // Track last sync time
-        this.isRoomCreator = false; // Track if user is room creator
-        this.onlineCount = 1; // Track online users
         
         this.init();
     }
@@ -35,32 +33,6 @@ class YouTubeWatchTogether {
         this.initializeSocketWithRetry();
         
         this.applySavedTheme();
-        
-        // Check if user is joining or creating a room
-        this.checkRoomAction();
-    }
-
-    checkRoomAction() {
-        const urlParams = new URLSearchParams(window.location.search);
-        const action = urlParams.get('action');
-        
-        if (action === 'create') {
-            this.isRoomCreator = true;
-            // Show video URL input for room creator
-            document.getElementById('videoUrlGroup').style.display = 'flex';
-            
-            // Auto-load video if URL was provided
-            const videoUrl = localStorage.getItem('videoUrl');
-            if (videoUrl) {
-                document.getElementById('videoUrl').value = videoUrl;
-                this.loadVideo();
-                localStorage.removeItem('videoUrl');
-            }
-        } else if (action === 'join') {
-            this.isRoomCreator = false;
-            // Hide video URL input for room joiner
-            document.getElementById('videoUrlGroup').style.display = 'none';
-        }
     }
 
     initializeSocketWithRetry() {
@@ -127,8 +99,6 @@ class YouTubeWatchTogether {
         document.getElementById('userMenu')?.addEventListener('click', (e) => this.toggleUserMenu(e));
         document.getElementById('logoutBtn')?.addEventListener('click', () => AuthManager.logout());
         document.getElementById('shareRoom')?.addEventListener('click', () => this.shareRoom());
-        document.getElementById('copyRoomId')?.addEventListener('click', () => this.copyRoomId());
-        document.getElementById('copyRoomIdBtn')?.addEventListener('click', () => this.copyRoomId());
         document.getElementById('newRoom')?.addEventListener('click', () => this.createNewRoom());
         document.addEventListener('click', (e) => {
             if (!e.target.closest('.user-menu')) {
@@ -162,8 +132,6 @@ class YouTubeWatchTogether {
         });
 
         this.socket.on('user-joined', (userId) => {
-            this.onlineCount++;
-            this.updateOnlineCount();
             this.addChatMessage('System', `User ${userId} joined the room`, true);
             this.showNotification('Peer joined the room', 'info');
             // Create a new peer connection for this user
@@ -172,10 +140,6 @@ class YouTubeWatchTogether {
 
         this.socket.on('room-users', (users) => {
             console.log('Users in room:', users);
-            // Set online count based on users in room
-            this.onlineCount = users.length + 1; // +1 for current user
-            this.updateOnlineCount();
-            
             // Connect to existing users
             users.forEach(userId => {
                 if (userId !== this.myPeerId && !this.peers.has(userId)) {
@@ -185,8 +149,6 @@ class YouTubeWatchTogether {
         });
 
         this.socket.on('user-left', (userId) => {
-            this.onlineCount = Math.max(1, this.onlineCount - 1);
-            this.updateOnlineCount();
             this.addChatMessage('System', `User ${userId} disconnected`, true);
             this.showNotification('Peer disconnected', 'info');
             // Clean up the peer connection
@@ -227,13 +189,6 @@ class YouTubeWatchTogether {
             this.showNotification('Disconnected from server', 'error');
             this.updateConnectionStatus(false);
         });
-    }
-
-    updateOnlineCount() {
-        const onlineCountElement = document.getElementById('onlineCount');
-        if (onlineCountElement) {
-            onlineCountElement.textContent = `${this.onlineCount} online`;
-        }
     }
 
     createPeerConnection(userId, isInitiator) {
@@ -449,11 +404,6 @@ class YouTubeWatchTogether {
                 }
                 this.showNotification('Video loaded successfully', 'success');
                 
-                // Share video with peers if connected
-                if (this.isConnected) {
-                    this.shareVideoWithPeers(videoId);
-                }
-                
             } catch (error) {
                 this.showNotification('Error loading video. Player state invalid.', 'error');
             } finally {
@@ -467,34 +417,6 @@ class YouTubeWatchTogether {
             this.addChatMessage('System', 'Invalid YouTube URL format', true);
             this.showNotification('Invalid YouTube URL', 'error');
         }
-    }
-
-    shareVideoWithPeers(videoId) {
-        const videoState = {
-            sender: this.myPeerId,
-            state: YT.PlayerState.CUED,
-            currentTime: 0,
-            videoId: videoId
-        };
-        
-        // Send through socket.io for reliability
-        this.socket.emit('video-state', {
-            target: this.roomId,
-            ...videoState
-        });
-        
-        // Also send through WebRTC data channels for lower latency
-        this.peers.forEach((peerConnection, userId) => {
-            const dataChannels = peerConnection.dataChannels || [];
-            dataChannels.forEach(dataChannel => {
-                if (dataChannel.readyState === 'open') {
-                    dataChannel.send(JSON.stringify({
-                        type: 'video-state',
-                        payload: videoState
-                    }));
-                }
-            });
-        });
     }
 
     extractVideoId(url) {
@@ -574,43 +496,6 @@ class YouTubeWatchTogether {
         const playerOverlay = document.getElementById('playerOverlay');
         if (playerOverlay) {
             playerOverlay.classList.add('hidden');
-        }
-        
-        // Handle YouTube's suggested videos
-        this.setupVideoEndDetection();
-    }
-
-    setupVideoEndDetection() {
-        // Check for video end every second
-        setInterval(() => {
-            if (this.player && this.player.getPlayerState() === YT.PlayerState.ENDED) {
-                this.handleVideoEnd();
-            }
-        }, 1000);
-    }
-
-    handleVideoEnd() {
-        // When video ends, YouTube shows suggested videos
-        // We need to detect clicks on these videos and load them
-        const iframe = document.querySelector('#player iframe');
-        if (iframe) {
-            try {
-                // We can't directly access YouTube's suggested videos due to cross-origin restrictions
-                // Instead, we'll monitor the player for changes
-                this.player.addEventListener('onStateChange', (e) => {
-                    if (e.data === YT.PlayerState.CUED && !this.isRoomCreator) {
-                        // Video was cued (possibly from suggested videos)
-                        // Notify room creator to share the video ID
-                        const videoId = this.player.getVideoData().video_id;
-                        if (videoId) {
-                            this.addChatMessage('System', `A new video was loaded: ${videoId}`, true);
-                            this.showNotification('New video loaded', 'info');
-                        }
-                    }
-                });
-            } catch (error) {
-                console.error('Error setting up video end detection:', error);
-            }
         }
     }
 
@@ -713,7 +598,6 @@ class YouTubeWatchTogether {
             case YT.PlayerState.CUED: 
                 if (this.player.getVideoData().video_id !== data.videoId) {
                     this.player.loadVideoById(data.videoId);
-                    this.addChatMessage('System', `New video loaded: ${data.videoId}`, true);
                 }
                 break;
         }
@@ -831,14 +715,9 @@ class YouTubeWatchTogether {
         this.showNotification('Room link copied to clipboard!', 'success');
     }
 
-    copyRoomId() {
-        this.copyToClipboard(this.roomId);
-        this.showNotification('Room ID copied to clipboard!', 'success');
-    }
-
     createNewRoom() {
         const newRoomId = `room-${Math.random().toString(36).substr(2, 9)}`;
-        window.location.href = `app.html?room=${newRoomId}&action=create`;
+        window.location.href = `app.html?room=${newRoomId}`;
     }
 
     copyToClipboard(text) {
